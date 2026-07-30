@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { AccountRepository } from './account-repository';
-import { systemClock, type Clock } from './clock';
+import { systemClock, type Clock } from '../clock';
 import { normalizeEmail } from './email';
 import { socialLoginStateMismatch } from './errors';
 import type { OAuthProviderRegistry } from './oauth-provider';

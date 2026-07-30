@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createRedisSessionStore } from '../../../services/account/adapters/redis-session-store';
-import { addSeconds } from '../../../services/account/clock';
+import { addSeconds } from '../../../services/clock';
 import { createFakeRedis } from '../../support/fake-redis';
 import { createMutableClock } from '../../support/mutable-clock';
 

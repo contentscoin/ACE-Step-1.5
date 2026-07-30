@@ -1,4 +1,4 @@
-import type { Clock } from '../../services/account/clock';
+import type { Clock } from '../../services/clock';
 
 export interface MutableClock extends Clock {
   /** Moves the clock forward. Requirement 1.5/1.8 tests use this, never sleep. */

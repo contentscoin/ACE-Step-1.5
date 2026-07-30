@@ -1,5 +1,5 @@
 import type { AccountRepository } from './account-repository';
-import { systemClock, type Clock } from './clock';
+import { systemClock, type Clock } from '../clock';
 import {
   createEmailVerificationTokens,
   type EmailSender,

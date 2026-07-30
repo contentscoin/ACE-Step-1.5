@@ -1,14 +1,15 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
-import { isAccountError, type AccountError } from '../../services/account/errors';
+import { isRegistryError } from '../../adapters/registry/errors';
+import { isAccountError } from '../../services/account/errors';
 
 /**
  * Single error contract for the gateway.
  *
  * Every failure body is `{ "error": { "code", "message", ... } }`. The `code`
- * is the machine-readable reason Requirement 1 asks for in several places
- * (1.2 duplicate, 1.8 token expiry), so clients branch on `code`, never on
- * status alone.
+ * is the machine-readable reason several criteria ask for (1.2 duplicate, 1.8
+ * token expiry, 20.5/20.6/20.11/20.13/20.22/20.23 registry rejections), so
+ * clients branch on `code`, never on status alone.
  */
 export interface ErrorBody {
   readonly error: {
@@ -26,10 +27,23 @@ const TOKEN_ERROR_CODES = new Set([
   'account_not_found',
 ]);
 
+/**
+ * The shape both `AccountError` and `RegistryError` satisfy.
+ *
+ * Structural rather than a shared base class, so a domain module never has to
+ * import a transport type to be renderable by this handler.
+ */
+interface CodedDomainError {
+  readonly statusCode: number;
+  readonly code: string;
+  readonly message: string;
+  readonly details: Readonly<Record<string, unknown>>;
+}
+
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler((error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
-    if (isAccountError(error)) {
-      sendAccountError(reply, error);
+    if (isAccountError(error) || isRegistryError(error)) {
+      sendDomainError(reply, error);
       return;
     }
 
@@ -53,7 +67,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
   });
 }
 
-function sendAccountError(reply: FastifyReply, error: AccountError): void {
+function sendDomainError(reply: FastifyReply, error: CodedDomainError): void {
   if (error.code === 'login_temporarily_locked') {
     const retryAfter = error.details.retryAfterSeconds;
     if (typeof retryAfter === 'number') {

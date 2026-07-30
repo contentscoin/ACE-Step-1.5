@@ -1,9 +1,12 @@
 /**
- * Injectable time source.
+ * Injectable time source, shared by every service in the product layer.
  *
- * Every time-dependent rule in Requirement 1 (token lifetimes 1.3/1.8, the
- * 15-minute login lockout 1.5) reads the current instant through this port so
- * tests can advance time deterministically instead of sleeping.
+ * Time-dependent rules read the current instant through this port so tests can
+ * advance time deterministically instead of sleeping:
+ *
+ * - Requirement 1.3/1.8 token lifetimes and 1.5 login lockout (Account_Service)
+ * - Requirement 20.7 health-check interval and 20.12 daily quota reset at
+ *   00:00 UTC (Provider_Registry)
  */
 export interface Clock {
   now(): Date;

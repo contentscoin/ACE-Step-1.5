@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { systemClock, type Clock } from './clock';
+import { systemClock, type Clock } from '../clock';
 import type { SessionStore } from './session-store';
 import type { TokenPair, TokenService } from './token-service';
 

@@ -1,4 +1,4 @@
-import { addSeconds, systemClock, type Clock } from './clock';
+import { addSeconds, systemClock, type Clock } from '../clock';
 import { loginTemporarilyLocked } from './errors';
 
 /** Requirement 1.5: the failure count at which login starts being refused. */

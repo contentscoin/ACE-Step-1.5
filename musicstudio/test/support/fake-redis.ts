@@ -1,4 +1,4 @@
-import type { Clock } from '../../services/account/clock';
+import type { Clock } from '../../services/clock';
 import type { RedisCommands } from '../../services/account/adapters/redis-commands';
 
 /**

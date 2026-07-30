@@ -1,4 +1,4 @@
-import { systemClock, type Clock } from '../clock';
+import { systemClock, type Clock } from '../../clock';
 import type { SessionRecord, SessionStore } from '../session-store';
 
 import { toRedisTtlSeconds, type RedisCommands } from './redis-commands';

@@ -1,4 +1,4 @@
-import type { Clock } from '../../services/account/clock';
+import type { Clock } from '../../services/clock';
 import type { LoginResult } from '../../services/account/login-service';
 import type { SocialLoginResult } from '../../services/account/social-login-service';
 

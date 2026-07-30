@@ -12,8 +12,8 @@ export type {
 } from './account-repository';
 export { createAccountService } from './account-service';
 export type { AccountService, AccountServiceDependencies } from './account-service';
-export { addSeconds, systemClock, toUnixSeconds } from './clock';
-export type { Clock } from './clock';
+export { addSeconds, systemClock, toUnixSeconds } from '../clock';
+export type { Clock } from '../clock';
 export { maskEmail, normalizeEmail } from './email';
 export {
   createEmailVerificationTokens,

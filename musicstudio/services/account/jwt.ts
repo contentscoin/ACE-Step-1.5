@@ -1,6 +1,6 @@
 import { SignJWT, errors as joseErrors, jwtVerify, type JWTPayload } from 'jose';
 
-import { toUnixSeconds } from './clock';
+import { toUnixSeconds } from '../clock';
 import { tokenExpired, tokenInvalid } from './errors';
 
 /**

@@ -1,18 +1,32 @@
 import Fastify, { LogController, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 
+import type { EngineAdapterFactoryPort } from '../../adapters/registry/ports';
+import type { ProviderRegistry } from '../../adapters/registry/provider-registry';
 import type { AccountService } from '../../services/account/account-service';
-import { systemClock, type Clock } from '../../services/account/clock';
+import { systemClock, type Clock } from '../../services/clock';
 
 import { createAuthenticationHook, registerAuthenticationDecorator } from './authentication';
 import { registerErrorHandler } from './error-handler';
 import { registerAccountRoutes } from './routes/account-routes';
 import { registerAuthRoutes } from './routes/auth-routes';
+import { registerEngineRoutes } from './routes/engine-routes';
 
 export const API_PREFIX = '/v1';
+
+/**
+ * Provider_Registry wiring is optional: an auth-only gateway is still a valid
+ * composition, and leaving it out keeps the Requirement 1 tests independent of
+ * the engine layer.
+ */
+export interface GatewayEngineDependencies {
+  readonly registry: ProviderRegistry;
+  readonly adapterFactory: EngineAdapterFactoryPort;
+}
 
 export interface GatewayDependencies {
   readonly accountService: AccountService;
   readonly clock?: Clock;
+  readonly engines?: GatewayEngineDependencies;
   readonly fastifyOptions?: FastifyServerOptions;
 }
 
@@ -44,6 +58,13 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
     async (scope) => {
       registerAuthRoutes(scope, { accountService: deps.accountService, clock });
       registerAccountRoutes(scope, { authenticate });
+      if (deps.engines !== undefined) {
+        registerEngineRoutes(scope, {
+          registry: deps.engines.registry,
+          adapterFactory: deps.engines.adapterFactory,
+          authenticate,
+        });
+      }
     },
     { prefix: API_PREFIX },
   );

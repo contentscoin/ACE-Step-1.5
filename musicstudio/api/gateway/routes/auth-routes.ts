@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 
 import type { AccountService } from '../../../services/account/account-service';
-import { systemClock, type Clock } from '../../../services/account/clock';
+import { systemClock, type Clock } from '../../../services/clock';
 import { presentLogin, presentSocialLogin, type TokenPairBody } from '../presenters';
 import {
   loginSchema,

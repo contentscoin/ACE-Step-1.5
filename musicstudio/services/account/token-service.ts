@@ -1,4 +1,4 @@
-import { addSeconds, systemClock, type Clock } from './clock';
+import { addSeconds, systemClock, type Clock } from '../clock';
 import { tokenInvalid } from './errors';
 import { createJwtSigner, type JwtSigner } from './jwt';
 
