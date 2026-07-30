@@ -115,7 +115,14 @@ describe('audit log monthly partitions (design §4.4)', () => {
   it('places every instant in exactly one partition', () => {
     fc.assert(
       fc.property(
-        fc.date({ min: new Date('2000-01-01T00:00:00.000Z'), max: new Date('2100-01-01T00:00:00.000Z') }),
+        // `noInvalidDate` is required: `fc.date` admits `Invalid Date` even
+        // inside a min/max range, and an Invalid Date is not an instant, so it
+        // lies outside the property's input space.
+        fc.date({
+          min: new Date('2000-01-01T00:00:00.000Z'),
+          max: new Date('2100-01-01T00:00:00.000Z'),
+          noInvalidDate: true,
+        }),
         (instant) => {
           const partition = partitionFor(instant);
 
@@ -139,7 +146,11 @@ describe('audit log monthly partitions (design §4.4)', () => {
   it('never prunes a partition inside the retention window', () => {
     fc.assert(
       fc.property(
-        fc.date({ min: new Date('2015-01-01T00:00:00.000Z'), max: new Date('2035-01-01T00:00:00.000Z') }),
+        fc.date({
+          min: new Date('2015-01-01T00:00:00.000Z'),
+          max: new Date('2035-01-01T00:00:00.000Z'),
+          noInvalidDate: true,
+        }),
         fc.integer({ min: AUDIT_LOG_MIN_RETENTION_DAYS, max: 3650 }),
         (now, retainDays) => {
           const partitions = partitionsFrom(new Date('2015-01-01T00:00:00.000Z'), 300);

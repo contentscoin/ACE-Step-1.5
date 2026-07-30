@@ -23,11 +23,19 @@
     "sourceMap": true,
     "paths": {
       "@domain/*": ["./domain/*"],
+      "@db/*": ["./db/*"],
       "@services/*": ["./services/*"],
       "@adapters/*": ["./adapters/*"],
       "@api/*": ["./api/*"]
     }
   },
-  "include": ["api/**/*.ts", "services/**/*.ts", "adapters/**/*.ts", "domain/**/*.ts", "test/**/*.ts"],
+  "include": [
+    "api/**/*.ts",
+    "services/**/*.ts",
+    "adapters/**/*.ts",
+    "domain/**/*.ts",
+    "db/**/*.ts",
+    "test/**/*.ts"
+  ],
   "exclude": ["node_modules", "build", "web", "dsp"]
 }
