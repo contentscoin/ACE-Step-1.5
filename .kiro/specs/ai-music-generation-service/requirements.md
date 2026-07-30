@@ -68,7 +68,8 @@ Suno AI와 동등한 수준의 AI 음악 생성 서비스에서 출발하여, **
 - **Manifest_Printer**: Cue_Pack_Manifest 구조체를 Cue_Pack_Manifest 파일로 변환하는 구성요소.
 - **Speech_Service**: 스크립트 텍스트와 Voice_Profile로 Asset_Kind가 `dialogue`인 Audio_Asset을 생성하는 하위 시스템.
 - **Voice_Service**: Voice_Profile의 등록, 복제, 카탈로그 제공, 공유, 삭제, 음성 변환을 담당하는 하위 시스템.
-- **Voice_Profile**: 저장된 음성 1개. 참조 샘플로 복제한 `cloned` 유형과 엔진 내장 음성을 가리키는 `preset` 유형을 가진다. 화자의 동의 철회가 접수된 프로필은 **사용 중지 상태**로 전환되며, 이 상태에서는 프로필 자체와 참조 샘플이 보존되지만 대사 생성과 음성 변환의 입력으로 사용할 수 없다.
+- **Voice_Profile**: 저장된 음성 1개. 참조 샘플로 복제한 `cloned` 유형과 엔진 내장 음성을 가리키는 `preset` 유형을 가진다. **정상 상태**, **잠정 사용 제한 상태**, **사용 중지 상태** 중 정확히 하나의 상태를 가진다. 정상 상태에서는 대사 생성과 음성 변환의 입력으로 사용할 수 있다. 잠정 사용 제한 상태에서는 신규 생성 입력으로 사용할 수 없으나 이미 공개된 산출 자산의 공개 상태는 유지된다. 사용 중지 상태에서는 신규 생성 입력으로 사용할 수 없고 해당 프로필로 생성된 공개 자산이 비공개로 전환된다.
+- **잠정 사용 제한 상태**: 동의 철회가 접수되었으나 신원 확인이 완료되지 않은 Voice_Profile의 상태. 신규 생성은 거부되고 기존 공개 자산의 공개 상태는 유지된다.
 - **Voice_Consent_Record**: 복제 대상 음성에 대한 권리 보유와 금지 용도 미사용을 확약한 동의 기록.
 - **Transcription_Service**: 오디오를 텍스트와 행 단위 타이밍으로 변환하는 하위 시스템.
 - **Timeline_Service**: Timeline_Project와 Timeline_Clip의 생성, 이동, 트리밍, 분할, 되돌리기를 담당하는 하위 시스템.
@@ -89,6 +90,7 @@ Suno AI와 동등한 수준의 AI 음악 생성 서비스에서 출발하여, **
 - **Mastering_Assistant**: 오디오를 분석하여 사용자가 조회·수정할 수 있는 이펙트 파라미터를 제안하고, 라우드니스 정규화·대사 정리·자동 감쇠를 수행하는 하위 시스템.
 - **라우드니스 측정 규약**: Requirement 30에 정의된, 통합 라우드니스와 트루 피크의 측정 방법.
 - **발화 구간**: Requirement 30에 정의된 RMS 임계 기준으로 판정된 대사 오디오의 구간.
+- **Quality_Threshold_Set**: 오디오 품질 판정에 사용되는 임계값의 이름·현재 값·단위·허용 조정 범위와 집합 버전 식별자를 담은 설정 집합.
 - **UI_Sound_Layer**: MusicStudio 자체 인터페이스의 사운드 재생을 담당하는 클라이언트 구성요소.
 - **Amicro_Motion_Preset**: Amicro 라이브러리가 정의한 스프링 전환 프리셋. `snappy`, `bouncy`, `smooth`, `gentle`, `stiff` 5개.
 - **Motion_Classification_Table**: 모션이 적용된 각 구성요소의 애니메이션을 상태 전달 목적과 장식 목적 중 하나로 분류한 표.
@@ -627,9 +629,15 @@ Suno AI와 동등한 수준의 AI 음악 생성 서비스에서 출발하여, **
 25. THE Voice_Service SHALL 음성 변환 결과의 길이를 원본 음성 길이 기준 ±100밀리초 이내로 유지한다(불변식)
 26. WHEN 사용자가 음성 변환을 요청하면, THE Voice_Service SHALL 원본 음성 권리 보유 확약과 금지 용도 미사용 확약 2개 항목을 담은 Voice_Consent_Record의 저장을 변환 Generation_Job 생성의 선행 조건으로 적용하고, 두 확약 항목 중 하나 이상이 누락되거나 부정인 요청을 거부하며 크레딧을 차감하지 않는다
 27. THE MusicStudio SHALL 6개 금지 용도 분류와 동의 철회 절차를 포함한 책임 있는 사용 지침 문서를 `cloned` 유형 Voice_Profile 생성 화면과 음성 변환 요청 화면에서 1회 조작으로 열리는 링크로 제공한다
-28. WHEN 화자 또는 화자의 대리인이 Voice_Consent_Record에 기록된 연락 수단 또는 제품 내 철회 접수 창구를 통해 특정 Voice_Profile에 대한 동의 철회를 제출하면, THE Voice_Service SHALL 접수 시각으로부터 24시간 이내에 해당 Voice_Profile을 사용 중지 상태로 전환하고 철회 접수 사건과 상태 전환 사건을 Audit_Log에 기록한다
-29. WHILE Voice_Profile이 동의 철회로 사용 중지 상태인 동안, THE Speech_Service SHALL 해당 프로필 식별자를 지정한 대사 생성 요청과 음성 변환 요청을 거부하고 HTTP 403 상태 코드와 동의 철회 사유 코드를 반환하며 크레딧을 차감하지 않는다
-30. WHEN Voice_Profile이 동의 철회로 사용 중지 상태로 전환되면, THE Sharing_Service SHALL 해당 프로필로 생성된 공개 상태 Audio_Asset 전체를 24시간 이내에 비공개 상태로 전환하고 소유자에게 전환 사유와 대상 자산 목록을 통지한다
+28. WHEN 화자 또는 화자의 대리인이 Voice_Consent_Record에 기록된 연락 수단 또는 제품 내 철회 접수 창구를 통해 특정 Voice_Profile에 대한 동의 철회를 제출하면, THE Voice_Service SHALL 접수 시각으로부터 24시간 이내에 해당 Voice_Profile을 잠정 사용 제한 상태로 전환하고 철회 접수 사건을 Audit_Log에 기록하며 프로필 소유자에게 접수 사실과 이의 제기 방법을 통지한다
+29. WHILE Voice_Profile이 잠정 사용 제한 상태 또는 사용 중지 상태인 동안, THE Speech_Service SHALL 해당 프로필 식별자를 지정한 대사 생성 요청과 음성 변환 요청을 거부하고 HTTP 403 상태 코드와 동의 철회 사유 코드를 반환하며 크레딧을 차감하지 않는다
+30. WHILE Voice_Profile이 잠정 사용 제한 상태인 동안, THE Sharing_Service SHALL 해당 프로필로 생성된 Audio_Asset의 공개 상태를 철회 접수 이전 값과 동일하게 유지한다
+31. WHEN Voice_Profile이 잠정 사용 제한 상태로 전환되면, THE Voice_Service SHALL 철회 제출자에게 신원 확인 절차를 요구하고, 지정된 확인 문구를 낭독한 음성 또는 화자 신원을 증명하는 문서 중 1개를 잠정 사용 제한 전환 시각으로부터 14일 이내에 제출하도록 안내한다
+32. WHEN 철회 제출자의 신원 확인이 성공하면, THE Voice_Service SHALL 해당 Voice_Profile을 사용 중지 상태로 전환하고, 26.21에 정의된 삭제 대상 데이터를 24시간 이내에 삭제하며, 확인 성공 사건을 Audit_Log에 기록한다
+33. WHEN Voice_Profile이 사용 중지 상태로 전환되면, THE Sharing_Service SHALL 해당 프로필로 생성된 공개 상태 Audio_Asset 전체를 24시간 이내에 비공개 상태로 전환하고 소유자에게 전환 사유와 대상 자산 식별자 목록을 통지한다
+34. IF 철회 제출자의 신원 확인이 실패하거나 잠정 사용 제한 전환 시각으로부터 14일 이내에 신원 확인 자료가 제출되지 않으면, THEN THE Voice_Service SHALL 해당 Voice_Profile을 잠정 사용 제한 이전 상태로 복귀시키고, 복귀 사실을 소유자와 철회 제출자에게 통지하며, 복귀 사건을 Audit_Log에 기록한다
+35. THE Voice_Service SHALL 동일 Voice_Profile에 대해 접수하는 동의 철회 신청을 30일당 3건 이하로 제한하고, 4번째 신청을 거부하며 신청 상한과 다음 접수 가능 시각을 반환한다
+36. WHEN 프로필 소유자가 잠정 사용 제한에 대한 이의를 제출하면, THE Voice_Service SHALL 해당 프로필의 Voice_Consent_Record와 소유자가 제출한 이의 내용을 함께 담은 검토 항목을 운영자에게 전달하고, 이의 제출 사건을 Audit_Log에 기록한다
 
 ### Requirement 27: 음성 인식 및 타이밍 정렬
 
@@ -860,10 +868,32 @@ Suno AI와 동등한 수준의 AI 음악 생성 서비스에서 출발하여, **
 19. THE Library_Service SHALL 모든 Audio_Asset 다운로드 및 내보내기 요청에 대해 사용 목적 값을 `commercial`과 `non_commercial` 중 정확히 하나로 기록하고, 사용 목적 값이 전달되지 않은 요청에는 `non_commercial`을 적용한다
 20. WHEN 기존 Audio_Asset 1개 이상을 입력으로 하는 Edit_Task, 스템 추출, 이펙트 적용, 음성 변환, 믹스다운 중 하나의 결과로 새 Audio_Asset이 저장되면, THE MusicStudio SHALL 새 자산의 상업적 사용 허용 여부를 모든 직접 입력 자산의 상업적 사용 허용 여부와 처리에 사용된 모든 엔진의 상업적 사용 허용 여부가 참인 경우에만 참으로 기록한다
 21. THE MusicStudio SHALL 상업적 사용 허용 여부가 거짓인 조상 자산이 계보 깊이 32 이하에 1개 이상 존재하는 모든 Audio_Asset의 상업적 사용 허용 여부를 거짓으로 유지한다(불변식)
+22. THE MusicStudio SHALL 사용 목적 `commercial` 요청에 대한 상업적 사용 허용 여부 검사를 계정 요금제, 계정 등급, 운영자 설정, API 키 권한 중 어느 것으로도 우회할 수 없는 고정 정책으로 적용한다(불변식)
+23. WHEN 사용 목적 `commercial` 요청이 상업적 사용 허용 여부가 거짓인 이유로 거부되면, THE MusicStudio SHALL 거부 사건에 요청 계정 식별자, 대상 자산 식별자, 판정 근거 라이선스 식별자, 거부 시각을 담아 Audit_Log에 기록한다
+24. WHEN 사용자가 상업적 사용 허용 여부가 거짓인 Audio_Asset에 대해 상업적 사용이 허용된 엔진으로의 재생성을 요청하면, THE MusicStudio SHALL 원본 자산의 생성 파라미터를 동일하게 적용한 새 Generation_Job을 생성하고 산출 자산의 상업적 사용 허용 여부를 새 엔진 기준으로 기록한다
+
+### Requirement 34: 오디오 품질 임계값 보정 및 관리
+
+**User Story:** 운영자로서 나는 소리 품질 판정 기준을 실측으로 조정하고 싶다. 그래서 청감과 어긋난 기준이 생성 실패를 반복시키는 일을 막을 수 있다.
+
+#### Acceptance Criteria
+
+1. THE MusicStudio SHALL 루프 이음 RMS 차이 상한, 루프 이음 샘플 단차 비율 상한, 루프 양 끝 구간 에너지 하한, 원샷 꼬리 진폭 비율 상한, 사운드 팩 라우드니스 허용 범위, 큐 쌍 유사도 상한, V2A 온셋 정렬 허용 오차, V2A 온셋 충족률 하한, 발화 판정 RMS 임계값, 발화 판정 최소 지속 시간을 Quality_Threshold_Set 1개에 담아 관리한다
+2. THE Quality_Threshold_Set SHALL 각 임계값에 대해 임계값 이름, 현재 값, 단위, 허용 조정 범위를 보유하고 집합 전체에 대해 버전 식별자 1개를 보유한다
+3. THE MusicStudio SHALL Quality_Threshold_Set의 초기 값을 Requirement 21, 22, 23, 24, 30에 명시된 값과 동일하게 설정한다
+4. WHEN Quality_Threshold_Set의 임계값이 변경되면, THE MusicStudio SHALL 버전 식별자를 1 증가시키고 변경 이전 값, 변경 이후 값, 변경 주체 식별자, 변경 시각을 Audit_Log에 기록한다
+5. IF 임계값 변경 요청의 값이 해당 임계값의 허용 조정 범위를 벗어나면, THEN THE MusicStudio SHALL 변경을 거부하고 허용 조정 범위를 반환하며 기존 값을 유지한다
+6. WHEN Audio_Asset이 품질 임계값 검증을 거쳐 저장되면, THE MusicStudio SHALL 검증에 사용된 Quality_Threshold_Set 버전 식별자를 해당 자산의 출처 정보로 저장한다
+7. THE MusicStudio SHALL 각 임계값에 대해 20개 이상의 참조 자산에서 측정한 값의 분포와 합격·불합격 판정 결과를 담은 보정 근거 기록을 보유한다
+8. WHEN 특정 임계값에 의한 생성 실패율이 최근 7일간 20%를 초과하면, THE MusicStudio SHALL 운영자에게 해당 임계값 이름과 실패율을 포함한 보정 검토 경보를 발송한다
+9. THE MusicStudio SHALL Quality_Threshold_Set 조회 및 변경 권한을 운영자 역할에만 부여한다
+10. WHEN 운영자가 임계값 변경을 적용하면, THE MusicStudio SHALL 변경 이전에 저장된 Audio_Asset의 출처 정보와 검증 결과를 변경 없이 유지한다
 
 ## Appendix: 제품 결정으로 확정한 수치 가정
 
 아래 값은 참조 구현이나 ACE_Engine 상수에서 직접 도출되지 않은 **제품 결정**이며, 확인이 필요하다.
+
+**청감 관련 임계값에 대한 주석:** 아래 표의 루프 이음 연속성 판정 기준, 루프 양 끝 구간 에너지 하한, 꼬리 감쇠 판정 기준, 사운드 팩 라우드니스 측정 방식 및 허용 범위, 사운드 팩 큐 간 유사도 상한, V2A 온셋 정렬 허용 오차, V2A 온셋 정렬 충족률, 발화 구간 판정 기준의 수치는 **고정 상수가 아니라 Requirement 34가 정의하는 Quality_Threshold_Set의 초기 값**이다. 이 값들은 Requirement 34.3에 따라 Requirement 21, 22, 23, 24, 30에 명시된 값으로 초기화되며, 이후 조정은 요구사항 변경 없이 Requirement 34.4부터 34.10의 절차(버전 증가, Audit_Log 기록, 허용 조정 범위 검증, 운영자 전용 권한, 보정 근거 기록)로 관리한다.
 
 | 항목 | 확정값 | 관련 요구사항 |
 | --- | --- | --- |
@@ -913,7 +943,9 @@ Suno AI와 동등한 수준의 AI 음악 생성 서비스에서 출발하여, **
 | Voice_Consent_Record 보관 기간 | 대상 Voice_Profile 삭제 시각으로부터 5년 | 26.14 |
 | Voice_Profile 공유 대상 인원 범위 | 1명 ~ 50명 | 26.19 |
 | Voice_Profile 삭제 처리 시한 | 접수 후 24시간 | 26.21 |
-| 동의 철회 처리 시한 / 공개 자산 비공개 전환 시한 | 접수 후 24시간 / 상태 전환 후 24시간 | 26.28, 26.30 |
+| 동의 철회 잠정 사용 제한 전환 시한 / 공개 자산 비공개 전환 시한 | 접수 후 24시간 / 사용 중지 상태 전환 후 24시간 | 26.28, 26.33 |
+| 동의 철회 신원 확인 자료 제출 기한 | 잠정 사용 제한 전환 시각으로부터 14일 | 26.31, 26.34 |
+| 동일 Voice_Profile 동의 철회 신청 상한 | 30일당 3건 (4번째 신청 거부) | 26.35 |
 | 음성 변환 길이 허용 오차 | ±100ms | 26.25 |
 | 전사 대상 오디오 제약 | 0.5초 ~ 3600초, 500MB 이하, 8000 ~ 48000Hz | 27.5, 27.15 |
 | 전사 결과 행 개수 범위 | 1개 ~ 2000개 | 27.1 |
@@ -978,6 +1010,8 @@ Suno AI와 동등한 수준의 AI 음악 생성 서비스에서 출발하여, **
 | License_Descriptor 변경 Audit_Log 기록 시한 | 5초 | 33.16 |
 | 상업적 사용 허용 여부 변경 통지 시한 | 24시간 | 33.17 |
 | 사용 목적 기본값 | `non_commercial` | 33.19 |
+| 임계값 보정 근거 참조 자산 개수 하한 | 20개 이상 | 34.7 |
+| 임계값 기인 생성 실패율 경보 임계 / 집계 구간 | 20% 초과 / 최근 7일 | 34.8 |
 | 원격 엔진 응답 제한 | 300초 | 20.14 |
 | 시간 초과 실패 시 환급 완료 시한 | 60초 | 20.15 |
 | 엔진 상태 점검 주기 / 대기 시간 / 이력 보관 | 60초 ±5초 / 10초 / 최근 100건 이상, 24시간 이상 | 20.7 |
