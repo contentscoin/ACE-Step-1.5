@@ -1,0 +1,26 @@
+{
+  "name": "musicstudio",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MusicStudio product layer — self-contained service (design §1.4.1). Independent of the host ACE-Step repository toolchain.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:property": "vitest run test/property",
+    "check:boundary": "eslint . && python dsp/scripts/check_import_boundary.py"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^22.20.1",
+    "eslint": "^9.39.1",
+    "fast-check": "^4.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vitest": "^3.2.4"
+  }
+}
