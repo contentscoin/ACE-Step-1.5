@@ -21,6 +21,94 @@
 - **포함**: 계정, 크레딧, 생성(곡·BGM·SFX·대사), 편집, 타임라인, 믹스다운, 이펙트, 마스터링, 라이브러리, 재생, 공유, 페르소나, 음성 복제·동의·철회, 전사, UI 사운드, 디자인 시스템, 라이선스 준수, 품질 임계값 관리, 개발자 API, 운영 모니터링
 - **제외**: 결제 게이트웨이 내부, 영상 편집, 악보 편집, 소셜 DM
 
+### 1.4 저장소 및 배포 경계
+
+#### 1.4.1 제품 계층은 독립 서비스다
+
+§1은 ACE-Step을 **외부 서비스**로 규정한다(§2.1의 `System_Ext`). 따라서 제품 계층(MusicStudio)은 ACE-Step 엔진과 **별도의 배포 단위이자 별도의 저장소로 최종 분리되는 것을 전제**한다.
+
+현재는 전환 비용을 줄이기 위해 `ACE-Step-1.5` 저장소의 `musicstudio/` 디렉터리에 **자체 완결적(self-contained) 서비스로 스캐폴드**한다. 이후 `git filter-repo`로 이력을 보존한 채 독립 저장소로 추출한다. 이 전제 때문에 `musicstudio/`는 처음부터 상위 저장소의 빌드·의존성·테스트 체계에 의존하지 않도록 설계되어야 한다.
+
+#### 1.4.2 `musicstudio/`는 자체 도구 체계를 갖는다
+
+| 대상 | 방침 |
+|------|------|
+| `musicstudio/package.json` | 신규 생성. 제품 계층 Node/TypeScript 의존성 선언 |
+| `musicstudio/tsconfig.json` | 신규 생성. 제품 계층 전용 컴파일러 설정 |
+| `musicstudio/` 테스트 하네스 | 자체 보유. `fast-check`(TypeScript PBT) |
+| `musicstudio/dsp/pyproject.toml` | 신규 생성. DSP worker 의존성(`hypothesis`, pedalboard, librosa, pyloudnorm 등)을 독립 선언 |
+| **저장소 루트 `package.json`** | **변경하지 않는다.** VitePress 문서 전용 |
+| **저장소 루트 `pyproject.toml`** | **변경하지 않는다.** ACE-Step 엔진 의존성 전용 |
+
+DSP worker 의존성을 루트 `pyproject.toml`에 추가하지 않는 이유는, 엔진의 PyTorch/CUDA 의존성 해석과 제품 계층 DSP 의존성 해석을 분리하여 어느 한쪽의 버전 제약이 다른 쪽을 오염시키지 않게 하기 위함이다. 두 Python 환경은 독립적으로 해석·설치된다.
+
+#### 1.4.3 규약 적용 경계
+
+저장소 루트의 `AGENTS.md`가 정의하는 규약은 **`acestep/` 이하 엔진 코드에 적용된다**.
+
+| 규약(`AGENTS.md`) | `acestep/` | `musicstudio/` |
+|-------------------|-----------|----------------|
+| unittest 스타일 테스트 | 적용 | 미적용 — §10 전략(`fast-check` / `hypothesis`) 사용 |
+| `*_test.py` 명명 | 적용 | 미적용 — §12 스택의 관례 사용 |
+| 모듈 150 LOC 권장 / 200 LOC 상한 | 적용 | **원칙으로 적용** (§1.4.3 하단 참조) |
+| Python 3.11–3.12 | 적용 | DSP worker에만 관련. `musicstudio/dsp/pyproject.toml`이 독립 선언 |
+| loguru 로깅 | 적용 | 미적용 — §11.2의 구조화 로그 필드 규격 사용 |
+
+`musicstudio/` 이하 제품 계층은 §10에 정의된 자체 테스트 전략과 §12의 스택을 따른다. 단 다음 두 원칙은 `musicstudio/`에도 **동일하게 적용한다**:
+
+- **단일 책임 모듈 유지와 모듈 크기 억제** — 언어별 관용 LOC는 다를 수 있으나, 책임이 하나를 넘으면 분리한다.
+- **모든 동작 변경에 대응하는 테스트 추가** — 동작을 바꾸는 변경은 그 동작을 고정하는 테스트를 동반한다.
+
+#### 1.4.4 결합 불변식 (Coupling Invariant)
+
+> **불변식**: `musicstudio/` 이하 코드는 `acestep/` 내부 모듈을 직접 import하지 않는다. ACE-Step과의 유일한 결합점은 `ACE_Engine_Adapter`(§3.1, §3.6)가 호출하는 **HTTP 인터페이스**다.
+
+이 불변식은 §1.2의 **엔진 투명성** 원칙을 저장소 수준에서 기계적으로 강제한 형태이며, §1.4.1의 독립 저장소 추출을 가능하게 하는 전제 조건이다. 위반은 §14 위험 #9로 추적하며, 위반을 CI에서 실패시키는 린트 규칙으로 방어한다.
+
+#### 1.4.5 `musicstudio/` 디렉터리 구조
+
+§2.2의 계층·서비스 목록과 §12의 스택 선택에서 직접 도출한 최상위 형태다.
+
+```
+musicstudio/
+├── package.json                # 제품 계층 Node 의존성 (루트와 독립)
+├── tsconfig.json               # 제품 계층 TS 설정
+├── api/                        # API 게이트웨이 계층 (Fastify)
+│   ├── gateway/                #   API Gateway / Auth Middleware
+│   ├── public/                 #   Public_API (Req 17, Rate Limit)
+│   └── sse/                    #   진행 상태 스트리밍 (§2.3)
+├── services/                   # 도메인 서비스 계층 (§2.2)
+│   ├── account/                #   Account_Service
+│   ├── credit/                 #   Credit_Service
+│   ├── generation/             #   Generation_Gateway, Job_Orchestrator
+│   ├── library/                #   Library_Service, Playback_Service, Sharing_Service
+│   ├── persona/                #   Persona_Service
+│   ├── speech/                 #   Speech_Service, Voice_Service, Transcription_Service
+│   ├── sound/                  #   BGM_Service, SFX_Service, V2A_Service, Sound_Pack_Service
+│   ├── timeline/               #   Timeline_Service, Mixdown_Renderer
+│   ├── effects/                #   Effects_Service, Mastering_Assistant
+│   └── moderation/             #   Moderation_Service
+├── adapters/                   # 엔진 어댑터 계층 (§3.1) — 유일한 외부 엔진 결합점
+│   ├── registry/               #   Provider_Registry, Engine_Descriptor
+│   ├── ace/                    #   ACE_Engine_Adapter (HTTP만; acestep/ import 금지)
+│   ├── woosh/                  #   Woosh_Adapter
+│   ├── tts/                    #   TTS_Adapter
+│   ├── deepafx/                #   DeepAFx_Adapter
+│   └── transcription/          #   Transcription_Adapter
+├── domain/                     # 파서/프린터·데이터 모델 (§4, §7) — 순수 로직, PBT 주 대상
+├── dsp/                        # Python DSP worker (§5, §12)
+│   ├── pyproject.toml          #   DSP 의존성 독립 선언 (루트와 독립)
+│   ├── src/                    #   리샘플링·이펙트·라우드니스·온셋·믹스다운 체인
+│   └── test/                   #   hypothesis 속성 테스트 + 단위 테스트
+├── web/                        # React SPA (§8) + UI_Sound_Layer
+├── db/                         # PostgreSQL 마이그레이션 · 스키마 (§4)
+└── test/                       # TypeScript 테스트 (§10)
+    ├── property/               #   fast-check 속성 테스트 (Property 1..N, 100회 이상)
+    ├── unit/                   #   예제 기반 단위 테스트
+    └── integration/            #   어댑터 E2E · 엔진 폴백 · 팩 완성도
+```
+
+`domain/`은 §7의 파서/프린터와 §4의 데이터 모델처럼 I/O가 없는 순수 로직을 모아 §10의 속성 기반 테스트가 인프라 없이 실행되도록 분리한 계층이다.
 
 ---
 
@@ -940,6 +1028,16 @@ stateDiagram-v2
 | 전사 | Whisper (OpenAI) | Deepgram | 자체 호스팅 가능, 다국어 |
 | CI/CD | GitHub Actions | GitLab CI | 레포 호스팅 일치 |
 
+### 12.1 격리 근거 (Isolation Rationale)
+
+위 스택은 **`musicstudio/` 내부에서만 성립하는 선택**이며, 호스트 저장소(`ACE-Step-1.5`)의 도구 체계와 겹치지 않는다. §1.4.2에 따라 이 스택의 의존성은 `musicstudio/package.json`과 `musicstudio/dsp/pyproject.toml`에 선언되고, 저장소 루트의 `package.json`(VitePress 문서 전용)과 `pyproject.toml`(ACE-Step 엔진 전용)은 변경하지 않는다.
+
+- **TypeScript/Fastify**를 백엔드로 선택했음에도 엔진이 Python이라는 점이 문제가 되지 않는 이유는, 결합점이 §1.4.4의 HTTP 인터페이스 하나로 고정되어 언어 경계가 이미 프로세스 경계와 일치하기 때문이다.
+- **Python DSP worker**는 엔진과 같은 언어를 쓰지만 **같은 환경을 공유하지 않는다.** 엔진의 PyTorch/CUDA 제약과 DSP의 pedalboard/librosa/pyloudnorm 제약을 독립 해석하기 위해 별도 `pyproject.toml`을 둔다.
+- **CI/CD (GitHub Actions)**는 호스트 저장소와 공유하되, `musicstudio/` 대상 워크플로는 경로 필터로 분리하고 §14 위험 #9의 import 경계 린트를 포함한다.
+
+이 격리는 §1.4.1의 독립 저장소 추출 시 스택 선택을 재검토하지 않아도 되게 만드는 것이 목적이다.
+
 ---
 
 ## 13. 추적성 테이블 (Requirements → Design)
@@ -996,3 +1094,4 @@ stateDiagram-v2
 | 6 | **78개 큐 일괄 생성 시간** — 큐당 실패·재시도 누적 | 사운드 팩 생성 10분 초과 가능 | 병렬 생성(동시 8개), 실패 큐만 재생성, 부분 완성 허용 |
 | 7 | **엔진 일일 쿼터 소진** — 피크 시간 대량 요청으로 쿼터 조기 소진 | 해당 엔진 종일 사용 불가 | 쿼터 소진 임박 경보(10%), 대체 엔진 라우팅, 쿼터 동적 증가 운영 절차 |
 | 8 | **타임라인 500클립 렌더링 성능** — CPU 바운드 렌더링 지연 | 믹스다운 대기 시간 증가 | 스트리밍 렌더링, 청크 병렬 처리, 워커 오토스케일링 |
+| 9 | **저장소 추출 지연에 따른 결합 축적** — 독립 저장소 분리를 `git filter-repo` 시점까지 미루면, 그 사이 `acestep/` 직접 import가 발생해 §1.4.4 불변식이 침식되고 추출 비용이 비선형으로 증가 | 추출 시점에 제품 계층이 엔진 내부 모듈에 의존하고 있어 분리 불가 또는 대규모 재작성 필요 | `musicstudio/ → acestep/` import를 **감지 시 실패시키는 린트/CI 규칙** 도입(경로 기반 import 금지 규칙, PR 필수 체크). 위반은 예외 없이 빌드 실패로 처리하며, 엔진 접근은 `ACE_Engine_Adapter`의 HTTP 경로만 허용 |
