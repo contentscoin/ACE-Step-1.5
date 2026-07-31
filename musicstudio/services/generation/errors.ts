@@ -108,7 +108,19 @@ export type GenerationErrorCode =
   /** Requirement 27.17 — a line time edit that would break 27.6, 27.7 or 27.8. */
   | 'transcription_edit_rejected'
   /** Requirement 27.11 — a line text edit outside 1–500 characters. */
-  | 'transcription_text_rejected';
+  | 'transcription_text_rejected'
+  /** Requirement 24.20 — see `services/sound/sound-pack-errors.ts` for the payload. */
+  | 'sound_pack_request_invalid'
+  /** Requirement 24.17 — a regeneration named something outside the Semantic_Cue taxonomy. */
+  | 'sound_pack_cue_unknown'
+  /**
+   * Requirements 24.10, 24.11 — the export did not produce the archive it promised.
+   *
+   * 500 rather than 422, unlike every quality code above it. A quality miss is a fact about
+   * generated audio the user can act on by regenerating; an archive holding 154 of 156 files,
+   * or one that took 70 seconds, is this service failing to keep its own promise.
+   */
+  | 'sound_pack_export_failed';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

@@ -63,6 +63,10 @@ describe('membership (Requirement 34.1)', () => {
       'sound_pack_loudness_min',
       'sound_pack_loudness_max',
       'cue_pair_similarity_max',
+      // Requirement 24.10's export budget, added by task 3.4. The one member that is not a
+      // perceptual judgement; `domain/quality/threshold-name.ts` states why it belongs here
+      // anyway and records the open question it raises against Requirement 34.1's list.
+      'sound_pack_export_budget_ms',
       'v2a_onset_alignment_tolerance_ms',
       'v2a_onset_alignment_rate_min',
       'v2a_onset_rise_db',

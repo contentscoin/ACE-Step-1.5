@@ -122,6 +122,18 @@ export const INITIAL_QUALITY_THRESHOLD_SET: QualityThresholdSet = {
       adjustableFrom: 0.5,
       adjustableTo: 0.999,
     },
+    // Requirement 24.10. Floored at 5 000 ms: 156 in-process encodes of short cues
+    // measure at roughly 500 ms on a developer machine, so a budget below five
+    // seconds would fail on a loaded runner rather than on a real regression. The
+    // ceiling of 600 000 ms is ten minutes, past which "returns the archive" stops
+    // being a defensible description of a synchronous download.
+    sound_pack_export_budget_ms: {
+      name: 'sound_pack_export_budget_ms',
+      value: 60_000,
+      unit: 'ms',
+      adjustableFrom: 5_000,
+      adjustableTo: 600_000,
+    },
     // Requirement 23.8.
     v2a_onset_alignment_tolerance_ms: {
       name: 'v2a_onset_alignment_tolerance_ms',

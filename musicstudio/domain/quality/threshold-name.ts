@@ -49,6 +49,31 @@ export const QUALITY_THRESHOLD_NAMES = [
   'sound_pack_loudness_max',
   /** Requirement 24.9 — cue-pair timbral similarity ceiling. */
   'cue_pair_similarity_max',
+  /**
+   * Requirement 24.10 — the wall-clock budget for exporting a Sound_Pack.
+   *
+   * The one member that is **not** a perceptual judgement, and the reason is
+   * worth stating because Requirement 34.1's enumeration is a list of perceptual
+   * thresholds and this is a latency budget.
+   *
+   * It belongs here anyway, by the same test every other member above passes:
+   * moving it changes only which *results are admissible* (an export that took
+   * 70 seconds), never what an already-recorded measurement meant. It is a
+   * ceiling on a measured quantity whose right value is discovered by operation
+   * rather than derived — 60 seconds is a product decision about how long a user
+   * will wait, and it is exactly the kind of number Requirement 34.8's
+   * failure-rate review exists to revisit. The alternative was a constant in
+   * `domain/sound-pack/bounds.ts`, which would make the one number in
+   * Requirement 24 most likely to need retuning the only one that could not be.
+   *
+   * **Open question for the spec**, the same one `loop_bar_alignment_tolerance_ms`
+   * and `voice_conversion_length_tolerance_ms` raise: whether 34.1's list is
+   * exhaustive or illustrative, and — here additionally — whether a
+   * non-perceptual budget belongs in a set whose stated subject is 청감 관련
+   * 임계값. If 34.1 is exhaustive and the set is perceptual-only, this member and
+   * the requirement disagree and the number should move to `bounds.ts`.
+   */
+  'sound_pack_export_budget_ms',
   /** Requirement 23.8 — onset alignment tolerance. */
   'v2a_onset_alignment_tolerance_ms',
   /** Requirement 23.8 — fraction of confident visual events that must align. */

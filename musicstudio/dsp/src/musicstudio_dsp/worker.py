@@ -48,10 +48,16 @@ from .effects import apply_chain, parse_chain
 from .formats import AudioFormat, decode, encode
 from .loudness import measure
 from .mastering import clean_dialogue, duck, normalise_loudness
+from .mfcc import CUE_PAIR_SIMILARITY_CEILING, mfcc_vector, similarity_report
 from .pipeline import (
     STORAGE_FORMAT,
     convert_for_download,
     normalise_for_storage,
+)
+from .sound_pack import (
+    CueSource,
+    export_pack,
+    max_short_term_loudness_lufs,
 )
 
 __all__ = [
@@ -61,7 +67,9 @@ __all__ = [
     "celery_app",
     "clean_dialogue_task",
     "convert_for_download_task",
+    "cue_pack_similarity_task",
     "duck_task",
+    "export_sound_pack_task",
     "measure_loudness_task",
     "normalise_for_storage_task",
     "normalise_loudness_task",
@@ -295,3 +303,73 @@ def _finite(value: float) -> float | None:
     import math
 
     return None if not math.isfinite(value) else value
+
+
+
+@celery_app.task(name="musicstudio_dsp.cue_pack_similarity")
+def cue_pack_similarity_task(
+    cues: list[dict[str, str]], similarity_ceiling: float | None = None
+) -> dict[str, Any]:
+    """Requirements 24.7, 24.9. Shell over :mod:`musicstudio_dsp.mfcc`.
+
+    One task for the whole pack rather than one per pair, because Requirement 24.9's
+    subject *is* the pack: 78 cues yield 3003 pairs, and the vectors are computed once
+    each and compared exhaustively in a single matrix product. Enqueuing 3003 pair tasks
+    would recompute each vector 77 times and would let a partial result look complete.
+
+    Each entry carries the cue name and its base64 audio. The 24.7 pack loudness comes
+    back alongside, because both quantities are per-cue measurements over the same decoded
+    buffer and decoding 78 cues twice for two tasks would be the expensive part done twice.
+
+    ``similarity_ceiling`` is a parameter, not a constant: it is a Quality_Threshold_Set
+    member (``cue_pair_similarity_max``) and Requirement 34.4 lets an operator change it
+    between two runs, so the product layer sends the value in force.
+    """
+    names = [str(entry["name"]) for entry in cues]
+    buffers = [decode(base64.b64decode(entry["audio_base64"])) for entry in cues]
+    vectors = [mfcc_vector(buffer) for buffer in buffers]
+    report = similarity_report(
+        vectors,
+        CUE_PAIR_SIMILARITY_CEILING if similarity_ceiling is None else similarity_ceiling,
+    )
+
+    return {
+        "cue_names": names,
+        "mfcc_vectors": [[float(value) for value in vector] for vector in vectors],
+        "similarity": report.as_dict(),
+        # Requirement 24.7's quantity per cue, in the order the cues arrived.
+        "pack_loudness_lufs": [
+            _finite(max_short_term_loudness_lufs(buffer)) for buffer in buffers
+        ],
+    }
+
+
+@celery_app.task(name="musicstudio_dsp.export_sound_pack")
+def export_sound_pack_task(
+    cues: list[dict[str, str]], manifest_document: str
+) -> dict[str, Any]:
+    """Requirements 24.10, 24.11. Shell over :func:`sound_pack.export_pack`.
+
+    ``manifest_document`` crosses as the text ``Manifest_Printer`` produced and is stored
+    verbatim — see :func:`sound_pack.export_pack` on why the worker must not reformat it.
+
+    The archive comes back base64-encoded for the reason the module docstring gives about
+    every audio payload here: the serializer is JSON. ``elapsed_ms`` is returned rather
+    than compared against Requirement 24.10's 60 seconds, because that comparison is a
+    Quality_Threshold_Set judgement and belongs to the product layer.
+    """
+    result = export_pack(
+        [
+            CueSource(
+                name=str(entry["name"]),
+                category=str(entry.get("category", "")),
+                audio=decode(base64.b64decode(entry["audio_base64"])),
+            )
+            for entry in cues
+        ],
+        manifest_document,
+    )
+    return {
+        "archive_base64": base64.b64encode(result.archive).decode("ascii"),
+        **result.as_dict(),
+    }

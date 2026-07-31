@@ -29,7 +29,9 @@ from musicstudio_dsp.worker import (
     celery_app,
     clean_dialogue_task,
     convert_for_download_task,
+    cue_pack_similarity_task,
     duck_task,
+    export_sound_pack_task,
     measure_loudness_task,
     normalise_for_storage_task,
     normalise_loudness_task,
@@ -44,6 +46,9 @@ TASK_NAMES = (
     "musicstudio_dsp.normalise_loudness",
     "musicstudio_dsp.clean_dialogue",
     "musicstudio_dsp.duck",
+    # Task 3.4's sound-pack shells (Requirements 24.7, 24.9, 24.10, 24.11).
+    "musicstudio_dsp.cue_pack_similarity",
+    "musicstudio_dsp.export_sound_pack",
 )
 
 
@@ -67,6 +72,8 @@ class TestApplication:
         assert normalise_loudness_task.name == TASK_NAMES[4]
         assert clean_dialogue_task.name == TASK_NAMES[5]
         assert duck_task.name == TASK_NAMES[6]
+        assert cue_pack_similarity_task.name == TASK_NAMES[7]
+        assert export_sound_pack_task.name == TASK_NAMES[8]
 
     def test_registers_no_task_this_tuple_does_not_name(self) -> None:
         # The tuple is exhaustive on purpose: a task added without extending it would be a
@@ -342,3 +349,96 @@ class TestDuckTask:
                 base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 96_000)).decode("ascii"),
             )
         )
+
+
+
+class TestCuePackSimilarityTask:
+    """The 24.9 shell. Behaviour lives in ``test_mfcc.py`` against the plain functions."""
+
+    @staticmethod
+    def cue(name: str, seed: int) -> dict[str, str]:
+        from cue_synthesis import distinct_cue
+
+        return {
+            "name": name,
+            "audio_base64": base64.b64encode(
+                encode(distinct_cue(seed, duration_ms=120.0), "wav")
+            ).decode("ascii"),
+        }
+
+    def test_returns_one_13_vector_per_cue_and_every_pair(self) -> None:
+        cues = [self.cue(f"cue-{index}", 900 + index) for index in range(6)]
+
+        result = cue_pack_similarity_task.run(cues)
+
+        assert result["cue_names"] == [cue["name"] for cue in cues]
+        assert all(len(vector) == 13 for vector in result["mfcc_vectors"])
+        assert result["similarity"]["pair_count"] == 6 * 5 // 2
+
+    def test_reports_the_24_7_pack_loudness_alongside(self) -> None:
+        # One task rather than two, because both quantities come from the same decoded
+        # buffer and decoding 78 cues twice would be the expensive part done twice.
+        result = cue_pack_similarity_task.run([self.cue("hover", 901)])
+        assert len(result["pack_loudness_lufs"]) == 1
+        assert result["pack_loudness_lufs"][0] is not None
+
+    def test_takes_the_ceiling_from_the_caller(self) -> None:
+        # `cue_pair_similarity_max` is a Quality_Threshold_Set member; Requirement 34.4
+        # lets an operator move it between two runs.
+        cues = [self.cue(f"cue-{index}", 910 + index) for index in range(4)]
+
+        assert cue_pack_similarity_task.run(cues, 0.95)["similarity"]["satisfied"] is True
+        assert cue_pack_similarity_task.run(cues, -1.0)["similarity"]["satisfied"] is False
+
+    def test_result_is_json_serialisable(self) -> None:
+        import json
+
+        json.dumps(cue_pack_similarity_task.run([self.cue("press", 920)]))
+
+
+class TestExportSoundPackTask:
+    """The 24.10/24.11 shell. Behaviour lives in ``test_sound_pack.py``."""
+
+    @staticmethod
+    def cue(name: str, seed: int) -> dict[str, str]:
+        from cue_synthesis import distinct_cue
+
+        return {
+            "name": name,
+            "category": "input",
+            "audio_base64": base64.b64encode(
+                encode(distinct_cue(seed, duration_ms=120.0), "wav")
+            ).decode("ascii"),
+        }
+
+    def test_returns_two_files_per_cue_in_one_archive(self) -> None:
+        from musicstudio_dsp.sound_pack import archive_paths
+
+        cues = [self.cue(f"cue-{index}", 800 + index) for index in range(5)]
+
+        result = export_sound_pack_task.run(cues, "{}")
+
+        assert result["file_count"] == 10
+        archive = base64.b64decode(result["archive_base64"])
+        assert len(archive_paths(archive)) == 11  # + the manifest
+
+    def test_carries_the_manifest_document_through_verbatim(self) -> None:
+        from musicstudio_dsp.sound_pack import manifest_bytes
+
+        document = '{\n  "packName": "Soft"\n}'
+        result = export_sound_pack_task.run([self.cue("hover", 810)], document)
+
+        archive = base64.b64decode(result["archive_base64"])
+        assert manifest_bytes(archive).decode("utf-8") == document
+
+    def test_reports_elapsed_time_without_judging_it(self) -> None:
+        # Requirement 24.10's 60-second budget is a Quality_Threshold_Set judgement and
+        # belongs to the product layer; the worker measures and reports.
+        result = export_sound_pack_task.run([self.cue("press", 820)], "{}")
+        assert result["elapsed_ms"] > 0.0
+        assert "within_budget" not in result
+
+    def test_result_is_json_serialisable(self) -> None:
+        import json
+
+        json.dumps(export_sound_pack_task.run([self.cue("drop", 830)], "{}"))

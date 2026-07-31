@@ -79,6 +79,20 @@ export interface SfxHarnessOptions {
   readonly thresholds?: QualityThresholdSource;
   /** Requirement 22.13's draw. Defaults to `TEST_SFX_BASE_SEED`. */
   readonly seeds?: SeedSource;
+  /**
+   * Audio for a variant, chosen by the seed it was submitted with.
+   *
+   * Added by task 3.4. `script(...)` is a FIFO queue, which is the right shape for a handful
+   * of variants submitted one after another and the wrong shape for a caller running many
+   * generations *concurrently* — a sound pack submits 78 with 8 in flight, so the order in
+   * which `awaitCandidate` is reached is a scheduling detail rather than something a test
+   * should encode. Keying on the seed is stable under any interleaving, because the seed is
+   * derived from the request before anything is submitted.
+   *
+   * Consulted after `script(...)` and before the transport's own derivation, so an existing
+   * test's behaviour is unchanged when this is not supplied.
+   */
+  readonly audioBySeed?: (seed: number) => PcmAudio | undefined;
 }
 
 export function createSfxHarness(options: SfxHarnessOptions = {}): SfxHarness {
@@ -92,7 +106,11 @@ export function createSfxHarness(options: SfxHarnessOptions = {}): SfxHarness {
     registerWooshTier(generation, transport, tier);
   }
 
-  const candidates = createScriptedSfxCandidatePort(generation, transport);
+  const candidates = createScriptedSfxCandidatePort(
+    generation,
+    transport,
+    options.audioBySeed,
+  );
 
   const service = new SfxService({
     orchestrator: generation.orchestrator,
@@ -151,6 +169,7 @@ function registerWooshTier(
 function createScriptedSfxCandidatePort(
   generation: GenerationHarness,
   transport: DeterministicWooshTransport,
+  audioBySeed?: (seed: number) => PcmAudio | undefined,
 ): ScriptedSfxCandidatePort {
   const queued: ScriptedSfxAttempt[] = [];
   const calls: { jobId: string; seed: number }[] = [];
@@ -192,6 +211,20 @@ function createScriptedSfxCandidatePort(
           alignmentScore: 'alignmentScore' in scripted ? (scripted.alignmentScore ?? null) : 0.5,
         };
         return { kind: 'produced', candidate };
+      }
+
+      const bySeed = audioBySeed?.(query.seed);
+      if (bySeed !== undefined) {
+        return {
+          kind: 'produced',
+          candidate: {
+            jobId: query.jobId,
+            assetId: nextAssetId(),
+            audio: bySeed,
+            seed: query.seed,
+            alignmentScore: 0.5,
+          },
+        };
       }
 
       const record = await generation.store.find(query.jobId);

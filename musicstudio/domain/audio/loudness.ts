@@ -54,8 +54,25 @@ const LOUDNESS_OFFSET = -0.691;
  */
 export const CHANNEL_WEIGHT_G = 1.0;
 
-/** Mean square of each 400 ms block, summed over weighted channels. */
-function blockMeanSquares(audio: PcmAudio): readonly number[] {
+/**
+ * Mean square of each 400 ms block, summed over weighted channels.
+ *
+ * `blockMs` and `hopMs` are parameters so that Requirement 24.7's per-window measurement
+ * can reuse this one K-weighting pass instead of growing a second one (see
+ * `shortTermLoudnessesLufs` below). Both default to the BS.1770-4 layout, and the default
+ * hop is deliberately computed **from `blockSamples`** rather than from `hopMs`: that is
+ * the arithmetic the gated measurement has always used, and `round(round(sr·0.4)·0.25)`
+ * and `round(sr·0.1)` are not the same integer at every sample rate (they differ by one at
+ * 1014 Hz, for instance). Deriving the default from the block keeps
+ * `integratedLoudnessLufs` bit-identical to what it computed before this parameter existed
+ * — which matters because Requirements 21.11 and 30.8 already compare its output against
+ * recorded values.
+ */
+function blockMeanSquares(
+  audio: PcmAudio,
+  blockMs: number = LOUDNESS_BLOCK_MS,
+  hopMs?: number,
+): readonly number[] {
   const stages = kWeightingStages(audio.sampleRate);
   const weighted = audio.channels.map((channel) => {
     let signal = channel;
@@ -63,8 +80,11 @@ function blockMeanSquares(audio: PcmAudio): readonly number[] {
     return signal;
   });
 
-  const blockSamples = Math.max(1, Math.round((audio.sampleRate * LOUDNESS_BLOCK_MS) / 1000));
-  const stepSamples = Math.max(1, Math.round(blockSamples * (1 - LOUDNESS_BLOCK_OVERLAP)));
+  const blockSamples = Math.max(1, Math.round((audio.sampleRate * blockMs) / 1000));
+  const stepSamples =
+    hopMs === undefined
+      ? Math.max(1, Math.round(blockSamples * (1 - LOUDNESS_BLOCK_OVERLAP)))
+      : Math.max(1, Math.round((audio.sampleRate * hopMs) / 1000));
   const frames = frameCount(audio);
   const channels = channelCount(audio);
 
@@ -126,4 +146,62 @@ export function integratedLoudnessLufs(audio: PcmAudio): number {
   if (gated.length === 0) return Number.NEGATIVE_INFINITY;
 
   return loudnessOf(mean(gated));
+}
+
+/**
+ * Requirement 24.7's window and interval for a sound-pack cue.
+ *
+ * 400 ms at 100 ms intervals — which is BS.1770-4's gating block at 75 % overlap, i.e.
+ * exactly the block layout `integratedLoudnessLufs` already uses. Restated here under the
+ * names Requirement 24.7 uses so a reader checking that clause finds its numbers, and so
+ * `domain/sound-pack/bounds.ts` and this module cannot drift apart.
+ */
+export const SHORT_TERM_WINDOW_MS = LOUDNESS_BLOCK_MS;
+export const SHORT_TERM_HOP_MS = LOUDNESS_BLOCK_MS * (1 - LOUDNESS_BLOCK_OVERLAP);
+
+/**
+ * Requirement 24.7's per-window loudness values, in window order.
+ *
+ * The same K-weighting and the same channel summation as the integrated measurement — one
+ * weighting implementation in this layer, not two — and deliberately **ungated**. A gate
+ * exists to exclude quiet blocks from a *mean*; 24.7 asks for the maximum of the window
+ * values, and gating a maximum could only ever remove the answer.
+ *
+ * A buffer shorter than one window is measured as a single window over the whole buffer.
+ * That is 24.7's own instruction — "오디오 길이가 400밀리초 미만인 큐는 전체 구간을 1개
+ * 창으로 측정" — and it is the accommodation `blockMeanSquares` already makes, for the
+ * reason stated there. It matters here far more than it does for `bgm`: most of the 78-cue
+ * taxonomy is one-shots under 1.5 seconds and many are under 400 ms, so the short-buffer
+ * path is the *normal* path for a sound pack rather than an edge case.
+ */
+export function shortTermLoudnessesLufs(
+  audio: PcmAudio,
+  windowMs: number = SHORT_TERM_WINDOW_MS,
+  hopMs: number = SHORT_TERM_HOP_MS,
+): readonly number[] {
+  if (!isWellFormed(audio)) return [];
+  return blockMeanSquares(audio, windowMs, hopMs).map(loudnessOf);
+}
+
+/**
+ * Requirement 24.7's quantity: the largest per-window loudness, or `-Infinity`.
+ *
+ * The **maximum**, not the mean and not the integrated value. The distinction is the whole
+ * content of the clause and is easy to lose: for a stationary signal the two agree, so a
+ * test using one steady tone cannot tell them apart, and a cue with a loud transient and a
+ * long quiet tail reads several LUFS louder under 24.7 than under Requirement 30.24. That
+ * is the intended reading — a UI cue is judged by how loud it *lands*, since a click that
+ * peaks at −14 LUFS is startling however quiet its decay makes the average.
+ *
+ * `-Infinity` for silence rather than a floor, by the rule `integratedLoudnessLufs`
+ * follows: a floor would put a silent cue inside the −25…−21 LUFS band it cannot be in.
+ */
+export function maxShortTermLoudnessLufs(
+  audio: PcmAudio,
+  windowMs: number = SHORT_TERM_WINDOW_MS,
+  hopMs: number = SHORT_TERM_HOP_MS,
+): number {
+  const values = shortTermLoudnessesLufs(audio, windowMs, hopMs);
+  if (values.length === 0) return Number.NEGATIVE_INFINITY;
+  return values.reduce((worst, value) => Math.max(worst, value), Number.NEGATIVE_INFINITY);
 }
