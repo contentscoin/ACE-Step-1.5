@@ -120,7 +120,30 @@ export type GenerationErrorCode =
    * generated audio the user can act on by regenerating; an archive holding 154 of 156 files,
    * or one that took 70 seconds, is this service failing to keep its own promise.
    */
-  | 'sound_pack_export_failed';
+  | 'sound_pack_export_failed'
+  /** Requirement 28.1 — no such Timeline_Project, or none owned by this account. */
+  | 'timeline_project_not_found'
+  | 'timeline_project_forbidden'
+  /** Requirements 28.1, 28.39 — a project name, description, tempo or time signature. */
+  | 'timeline_project_invalid'
+  /**
+   * Requirements 28.2, 28.4, 28.10, 28.11, 28.14, 28.16, 28.17, 28.18 — the edit itself.
+   *
+   * One code for every clip-shaped and track-shaped rejection because they share a payload —
+   * the violated fields with their permitted ranges — and a client acts on the payload rather
+   * than on the code. The two that do *not* share it get their own codes below.
+   */
+  | 'timeline_edit_rejected'
+  /** Requirement 28.5, carrying the current clip count and the ceiling of 500. */
+  | 'timeline_clip_limit_reached'
+  /** Requirement 28.8, carrying the conflicting clip identifiers and the overlap length. */
+  | 'timeline_clip_overlap'
+  /** Requirement 28.38's 이력 부재 사유 코드. */
+  | 'timeline_history_empty'
+  /** Requirement 28.34 — a clip referencing an Audio_Asset that does not exist. */
+  | 'timeline_asset_not_found'
+  /** Requirement 28.31 — a JSON project document that could not be parsed. */
+  | 'timeline_project_document_invalid';
 
 export class GenerationError extends Error {
   readonly statusCode: number;
