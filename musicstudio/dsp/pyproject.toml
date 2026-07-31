@@ -10,16 +10,36 @@ requires-python = ">=3.11,<3.13"
 license = { text = "MIT" }
 dependencies = [
     "numpy>=1.26",
+    # libsndfile is bundled in the wheel and covers all four download formats of
+    # Requirements 13.2 and 13.9 (wav/flac at PCM_24, mp3, ogg/vorbis), so the
+    # primary conversion path needs no external binary. See dsp/src/.../formats.py.
     "soundfile>=0.13.1",
+    # libsoxr, bundled in the wheel. Design §5.2's VHQ resampler. Self-contained:
+    # no system library, no compiler, ~200 kB — so the base pipeline of task 3.1
+    # stays installable by `pip install -e '.[dev]'` alone, which is what CI runs.
+    "soxr>=0.5",
+    # The worker framework itself (design §2.3, §11.3). Pure-Python wheels, no
+    # system dependency, and only `worker.py` imports it — the pipeline functions
+    # are broker-free by construction, so tests never reach a connection.
+    "celery>=5.4",
 ]
 
 [project.optional-dependencies]
 # Audio processing stack (design §5, §12). Kept as an extra so that lint,
 # type checks and the property harness can run without the heavy wheels.
+#
+# `pydub` belongs here rather than in the default set for a different reason than
+# the other three: it is small, but its mp3/ogg codecs shell out to an `ffmpeg`
+# or `avconv` binary, so it is a *subprocess* dependency on the machine rather
+# than a wheel dependency. Design §5.5 names it the fallback for format
+# conversion and `dsp/src/musicstudio_dsp/codecs.py` is the seam to it; the
+# primary path is libsndfile. Tests for the fallback skip, with the reason
+# stated, when no binary is present.
 audio = [
     "librosa>=0.10.2",
     "pedalboard>=0.9.12",
     "pyloudnorm>=0.1.1",
+    "pydub>=0.25.1",
 ]
 dev = [
     "hypothesis>=6.100",
