@@ -4,8 +4,9 @@
  * Two sources of evidence, both table-driven:
  *
  * - the term table (`domain/moderation/policy-terms.ts`), applied to every field;
- * - impersonating utterances (`domain/moderation/impersonation.ts`), applied only to
- *   a dialogue script, which is the field Requirement 16.11 is about.
+ * - impersonating utterances (`domain/moderation/impersonation.ts`), applied to the
+ *   fields in `IMPERSONATION_CHECKED_FIELDS` — Requirement 16.11's dialogue script
+ *   plus the two texts Requirement 26.16 adds.
  *
  * Results are sorted so two runs over the same input produce byte-identical
  * payloads. That matters beyond tidiness: the violation list ends up in an
@@ -13,6 +14,7 @@
  * look like two different events.
  */
 
+import { isImpersonationCheckedField } from '../../domain/moderation/fields';
 import type { PublicFigureEntry } from '../../domain/moderation/public-figures';
 import { findImpersonatingUtterances } from '../../domain/moderation/impersonation';
 import { POLICY_TERM_RULES, type PolicyTermRule } from '../../domain/moderation/policy-terms';
@@ -38,8 +40,10 @@ export function createRuleBasedPolicyClassifier(
     classify(input: PolicyClassificationInput): readonly PolicyViolation[] {
       const violations = [...termViolations(input, termRules)];
 
-      // Requirement 16.11 — only a dialogue script can impersonate a speaker.
-      if (input.field === 'dialogue_script') {
+      // Requirement 16.11 (dialogue script) and Requirement 26.16 (reference
+      // transcript, conversion profile designation). See
+      // `IMPERSONATION_CHECKED_FIELDS` for why captions and lyrics are excluded.
+      if (isImpersonationCheckedField(input.field)) {
         for (const finding of findImpersonatingUtterances(input.text, options.figures)) {
           violations.push({
             violationClass: 'impersonation',

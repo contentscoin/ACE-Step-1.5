@@ -13,6 +13,9 @@ import type { SongGateway } from '../../services/generation/song-gateway';
 import type { LyricsAssistant } from '../../services/lyrics/lyrics-assistant';
 import type { TimedLyricsService } from '../../services/lyrics/timed-lyrics-service';
 import type { ReportService } from '../../services/moderation/report-service';
+import type { ConsentService } from '../../services/voice/consent-service';
+import type { ProfileAccessService } from '../../services/voice/profile-access-service';
+import type { WithdrawalService } from '../../services/voice/withdrawal-service';
 
 import { createAuthenticationHook, registerAuthenticationDecorator } from './authentication';
 import { registerErrorHandler } from './error-handler';
@@ -25,6 +28,7 @@ import { registerGenerationRoutes } from './routes/generation-routes';
 import { registerLyricsRoutes } from './routes/lyrics-routes';
 import { registerModerationRoutes } from './routes/moderation-routes';
 import { registerSongRoutes } from './routes/song-routes';
+import { registerVoiceConsentRoutes } from './routes/voice-consent-routes';
 
 export const API_PREFIX = '/v1';
 
@@ -94,11 +98,27 @@ export interface GatewayLyricsDependencies {
   readonly timedLyrics?: TimedLyricsService;
 }
 
+/**
+ * Voice consent wiring (Requirements 26.12–26.23, 26.26–26.36), optional like the
+ * blocks above.
+ *
+ * The three services travel together because the routes need all three and splitting
+ * them would let a composition mount withdrawal intake without the profile state it
+ * transitions — a gateway that can accept a claim but not act on it.
+ */
+export interface GatewayVoiceConsentDependencies {
+  readonly consent: ConsentService;
+  readonly withdrawal: WithdrawalService;
+  readonly access: ProfileAccessService;
+}
+
 export interface GatewayDependencies {
   readonly accountService: AccountService;
   readonly clock?: Clock;
   readonly engines?: GatewayEngineDependencies;
   readonly moderation?: GatewayModerationDependencies;
+  /** Mounts the Requirement 26 consent, withdrawal and sharing routes when supplied. */
+  readonly voiceConsent?: GatewayVoiceConsentDependencies;
   /** Mounts the Requirement 8 / 10.8 lyric routes when supplied. */
   readonly lyrics?: GatewayLyricsDependencies;
   /** Mounts the Requirement 5 job lifecycle routes when supplied. */
@@ -145,6 +165,14 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
       }
       if (deps.moderation !== undefined) {
         registerModerationRoutes(scope, { reports: deps.moderation.reports, authenticate });
+      }
+      if (deps.voiceConsent !== undefined) {
+        registerVoiceConsentRoutes(scope, {
+          consent: deps.voiceConsent.consent,
+          withdrawal: deps.voiceConsent.withdrawal,
+          access: deps.voiceConsent.access,
+          authenticate,
+        });
       }
       if (deps.creditService !== undefined) {
         registerCreditRoutes(scope, { creditService: deps.creditService, authenticate });

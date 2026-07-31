@@ -41,6 +41,10 @@ import {
 import { createMutableClock, type MutableClock } from './mutable-clock';
 import { createRecordingEmailSender, type RecordingEmailSender } from './recording-email-sender';
 import {
+  createVoiceConsentHarness,
+  type VoiceConsentHarness,
+} from './voice-consent-harness';
+import {
   createConfigurablePricingPort,
   createRecordingAuditSink,
   type ConfigurablePricingPort,
@@ -65,6 +69,9 @@ export type GatewayGenerationHarness = GenerationHarness;
 /** Present only when `lyrics` was requested (task 2.3 lyric routes). */
 export type GatewayLyricsHarness = LyricsHarness;
 
+/** Present only when `voiceConsent` was requested (task 6.2 Requirement 26 routes). */
+export type GatewayVoiceConsentHarness = VoiceConsentHarness;
+
 /** Present only when `moderation` was requested (task 6.1 report routes). */
 export interface GatewayModerationHarness {
   readonly reports: ReportService;
@@ -81,6 +88,7 @@ export interface GatewayHarness {
   readonly emails: RecordingEmailSender;
   readonly engines: GatewayEngineHarness | null;
   readonly moderation: GatewayModerationHarness | null;
+  readonly voiceConsent: GatewayVoiceConsentHarness | null;
   readonly generation: GatewayGenerationHarness | null;
   readonly lyrics: GatewayLyricsHarness | null;
   close(): Promise<void>;
@@ -101,6 +109,12 @@ export interface GatewayHarnessOptions {
    * sharing the harness clock so report timestamps are deterministic.
    */
   readonly moderation?: { readonly publishedAssetIds?: readonly string[] };
+  /**
+   * Mounts the Requirement 26 consent, withdrawal, sharing and deletion routes, sharing
+   * the harness clock so the 24-hour, 14-day and 30-day windows are driven by the same
+   * time source the HTTP layer sees. Nothing sleeps.
+   */
+  readonly voiceConsent?: true;
   /**
    * Mounts the Generation_Job routes (Requirements 5.1, 5.3–5.5, 5.7, 6.1, 6.4),
    * sharing the harness clock so the 900-second budget and the one-second SSE bound
@@ -150,6 +164,9 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
       ? null
       : createGatewayModerationHarness(clock, options.moderation);
 
+  const voiceConsent =
+    options.voiceConsent === undefined ? null : createVoiceConsentHarness({ clock });
+
   const generation =
     options.generation === undefined
       ? null
@@ -164,6 +181,15 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
       ? {}
       : { engines: { registry: engines.registry, adapterFactory: engines.adapterFactory } }),
     ...(moderation === null ? {} : { moderation: { reports: moderation.reports } }),
+    ...(voiceConsent === null
+      ? {}
+      : {
+          voiceConsent: {
+            consent: voiceConsent.consent,
+            withdrawal: voiceConsent.withdrawal,
+            access: voiceConsent.access,
+          },
+        }),
     ...(lyrics === null
       ? {}
       : { lyrics: { assistant: lyrics.assistant, timedLyrics: lyrics.timedLyrics } }),
@@ -193,10 +219,19 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
     emails,
     engines,
     moderation,
+    voiceConsent,
     generation,
     lyrics,
     close: () => app.close(),
   };
+}
+
+/** Returns the voice consent harness, or throws if the gateway was built without one. */
+export function requireVoiceConsent(harness: GatewayHarness): GatewayVoiceConsentHarness {
+  if (harness.voiceConsent === null) {
+    throw new Error('this gateway harness was built without voice consent routes');
+  }
+  return harness.voiceConsent;
 }
 
 /** Returns the lyrics harness, or throws if the gateway was built without one. */
