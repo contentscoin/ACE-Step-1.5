@@ -37,7 +37,7 @@
 
 ## Phase 1: Foundation (데이터 모델, 인프라, 엔진 추상화)
 
-- [ ] 1. 기반 인프라 및 데이터 모델 구축
+- [x] 1. 기반 인프라 및 데이터 모델 구축
   - [x] 1.0 스캐폴드 및 결합 경계 강제
     - `musicstudio/` 디렉터리 구조 생성 (설계 §1.4.5의 최상위 형태): `musicstudio/api/`, `musicstudio/services/`, `musicstudio/adapters/`, `musicstudio/domain/`, `musicstudio/dsp/`, `musicstudio/web/`, `musicstudio/db/`, `musicstudio/test/`
     - `musicstudio/package.json`, `musicstudio/tsconfig.json` 신규 생성 (제품 계층 Node/TypeScript 의존성·컴파일러 설정 독립 선언)
@@ -84,7 +84,7 @@
     - **수용 기준**: 엔진 등록→상태 점검→사용 불가 전이→복귀 시나리오 테스트 통과
 
 
-  - [ ] 1.4 Credit_Service 구현 (크레딧 차감, 환급, 쿼터)
+  - [x] 1.4 Credit_Service 구현 (크레딧 차감, 환급, 쿼터)
     - Redis 원자 연산 기반 크레딧 잔액 관리
     - Asset_Kind × Engine 조합별 단가표 구현
     - 월간 쿼터, 동시 진행 상한, 요금제별 제한 적용
@@ -93,7 +93,7 @@
     - _설계: §2.4_
     - **수용 기준**: 잔액 부족 시 402, 동시 상한 초과 시 429, 실패 작업 환급 확인
 
-  - [ ] 1.5 Job_Orchestrator 및 BullMQ 작업 큐 구현
+  - [x] 1.5 Job_Orchestrator 및 BullMQ 작업 큐 구현
     - BullMQ 기반 Generation_Job 등록, 상태 폴링(5초 간격), 재시도(지수 백오프 3회)
     - SSE(Server-Sent Events) 실시간 상태 전송
     - 900초 시간 초과 → 실패 처리 + 크레딧 환급
@@ -107,7 +107,7 @@
 ## Phase 2: Core Generation (곡, BGM, SFX, 대사, V2A)
 
 - [ ] 2. 생성 서비스 구현
-  - [ ] 2.1 ACE_Engine_Adapter 및 Simple/Custom 모드 곡 생성
+  - [x] 2.1 ACE_Engine_Adapter 및 Simple/Custom 모드 곡 생성
     - ACE_Engine HTTP API 연동 어댑터 (submit, poll, fetchResult)
     - Simple_Mode: `sample_mode=true`, `thinking=true`, 설명 1–2000자 검증
     - Custom_Mode: 가사, BPM(30–300), 키(70개), 박자(2/3/4/6), 길이(10–600초) 검증
@@ -118,7 +118,7 @@
     - **수용 기준**: Simple 모드 E2E 곡 생성 성공, Custom 모드 파라미터 검증 실패 시 거부 확인
 
 
-  - [ ] 2.2 편집 작업 (커버, 리페인트, 스템 추출, 레이어 추가, 곡 확장) 구현
+  - [x] 2.2 편집 작업 (커버, 리페인트, 스템 추출, 레이어 추가, 곡 확장) 구현
     - `task_type` 매핑: cover, repaint, extract, lego, complete
     - 커버 강도(0.0–1.0), 리페인트 구간 시각 검증
     - 업로드 검증: mp3/wav/flac, ≤600초, ≤50MB
@@ -127,7 +127,7 @@
     - _설계: §3.6_
     - **수용 기준**: 각 Edit_Task 유형별 요청→결과 저장→계보 기록 확인
 
-  - [ ] 2.3 가사 보조 및 파서/프린터 구현
+  - [x] 2.3 가사 보조 및 파서/프린터 구현
     - Lyrics_Assistant: ACE_Engine `/format_input` 연동, 보강 결과 반환
     - Lyrics_Parser/Printer: 왕복·멱등 속성 보장, 7개 섹션 + 사용자 정의 섹션
     - LRC_Parser/Printer: `[mm:ss.xx]` 형식, ±10ms 왕복, 정렬 불변식
@@ -135,7 +135,7 @@
     - _설계: §7.1–§7.3_
     - **수용 기준**: 왕복 PBT(100회), 멱등 PBT(100회), 행 개수 불변식 검증 통과
 
-  - [ ] 2.4 BGM_Service 구현 (배경음악 + 루프)
+  - [x] 2.4 BGM_Service 구현 (배경음악 + 루프)
     - 장면 설명(1–2000자), 목표 길이(5–600초) 검증
     - 인스트루멘털 파라미터 고정 처리
     - 루프 이음 연속성 검증: RMS 차이 ≤1.0dB, 샘플 단차 ≤5%, 양 끝 에너지, 마디 정합
@@ -305,7 +305,7 @@
 ## Phase 6: Safety, Consent, Licensing (안전, 동의, 라이선스)
 
 - [ ] 6. 안전·동의·라이선스 구현
-  - [ ] 6.1 Moderation_Service 구현 (콘텐츠 정책 검사)
+  - [x] 6.1 Moderation_Service 구현 (콘텐츠 정책 검사)
     - 캡션·가사·스크립트 정책 검사 파이프라인
     - 실존 아티스트명 → 스타일 서술 대체 + 알림
     - 업로드 권리 동의 요구, 대사 사칭 차단
@@ -316,7 +316,7 @@
     - **수용 기준**: 정책 위반 입력 차단 + 크레딧 불변 확인, 신고→검토대기→피드 제외 흐름
 
 
-  - [ ] 6.2 Voice_Consent_Record 및 동의 철회 상태 머신 구현
+  - [x] 6.2 Voice_Consent_Record 및 동의 철회 상태 머신 구현
     - 동의 기록: 화자 본인 여부, 명시적 허가, 금지 용도 확약, 화자 관계 구분
     - 6개 금지 용도 분류 검사 (사칭, 인증 우회, 사기, 괴롭힘, 성적, 오해 유발)
     - 2단계 동의 철회 상태 머신: 정상→잠정 사용 제한(24h 내)→사용 중지(14일 내)
