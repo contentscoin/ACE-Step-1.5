@@ -181,7 +181,7 @@
 
 ## Phase 3: Audio Processing (DSP, 이펙트, 믹스다운)
 
-- [ ] 3. 오디오 처리 파이프라인 구현
+- [x] 3. 오디오 처리 파이프라인 구현
   - [x] 3.1 DSP 기본 파이프라인 (리샘플링, 포맷 변환) 구현
     - Python Celery worker 셋업 (`musicstudio/dsp/src/`, 의존성은 `musicstudio/dsp/pyproject.toml`)
     - libsoxr VHQ 리샘플링 (48kHz 정규화, 오차 ≤±10ms)
@@ -214,7 +214,7 @@
     - _설계: §5.5, §11.3_
     - **수용 기준**: 라우드니스 정규화 멱등 PBT 통과, 대사 정리 후 발화 구간 라우드니스 ±1.0LUFS
 
-  - [ ] 3.4 Sound_Pack_Service 구현 (78개 UI 사운드 큐 일괄 생성)
+  - [x] 3.4 Sound_Pack_Service 구현 (78개 UI 사운드 큐 일괄 생성)
     - 78개 Semantic_Cue 병렬 생성 (동시 8개)
     - 원샷 72개(0.05–1.5초), 루프 6개(0.5–4.0초) 길이 검증
     - 팩 내 라우드니스 -25~-21 LUFS (400ms 창 측정)
