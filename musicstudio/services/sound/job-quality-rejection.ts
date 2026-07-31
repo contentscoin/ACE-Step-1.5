@@ -28,22 +28,31 @@ import type {
   BgmQualityRejectionResult,
 } from './bgm-ports';
 import type { SfxQualityRejection, SfxQualityRejectionPort } from './sfx-ports';
+import type { V2aQualityRejection, V2aQualityRejectionPort } from './v2a-ports';
 
 /**
- * The rejection path, satisfying both sound services' ports.
+ * The rejection path, satisfying all three sound services' ports.
  *
  * The implementation reads exactly two things off a rejection — the job identifier and the
  * unmet criterion names, which it joins into the failure detail — and neither depends on
- * *which* criteria they are. So Requirement 21.18's loop criteria and Requirements 22.14/22.15's
- * SFX criteria go through the same function, and the intersection return type is how that is
- * said in the type system rather than in a comment. Two ports, one refund path.
+ * *which* criteria they are. So Requirement 21.18's loop criteria, Requirements 22.14/22.15's
+ * SFX criteria and Requirements 23.8/23.9/23.12/23.17's foley criteria go through the same
+ * function, and the intersection return type is how that is said in the type system rather
+ * than in a comment. Three ports, one refund path.
+ *
+ * An empty `unmet` list is legitimate and means "failed for a reason that is not a criterion
+ * miss" — Requirement 23.17's timeout is the case. The failure detail is then the criterion
+ * name list's empty string, and the reason code is still `loop_quality_unmet`, which is the
+ * only reason code the lifecycle vocabulary has for "this service ended the job itself". See
+ * the note in `services/sound/v2a-service.ts`; adding a reason code would be a change to
+ * `domain/generation-job/failure.ts` that Requirement 23 does not ask for.
  */
 export function createJobQualityRejection(
   runtime: JobRuntime,
-): BgmQualityRejectionPort & SfxQualityRejectionPort {
+): BgmQualityRejectionPort & SfxQualityRejectionPort & V2aQualityRejectionPort {
   return {
     async reject(
-      rejection: BgmQualityRejection | SfxQualityRejection,
+      rejection: BgmQualityRejection | SfxQualityRejection | V2aQualityRejection,
     ): Promise<BgmQualityRejectionResult> {
       const record = await runtime.store.find(rejection.jobId);
       // A job that no longer exists cannot be failed, and inventing a refund for it

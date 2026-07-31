@@ -23,6 +23,14 @@
  *    included here as `loop_bar_alignment_tolerance_ms`.
  *    **Open question for the spec:** whether 34.1's list is exhaustive or
  *    illustrative. If exhaustive, this member and the requirement disagree.
+ * 3. **A measured quantity's threshold is a member; the window it is measured
+ *    over is not.** Requirement 23.8 quotes four numbers — a 5 ms frame, a 50 ms
+ *    lookback, a 6.0 dB rise and a 0.50 confidence floor — and only the last two
+ *    are here. The same split `domain/sfx/bounds.ts` documents applies: moving a
+ *    window changes *what the number means*, so every verdict already recorded
+ *    against an earlier version would silently describe a different measurement,
+ *    which Requirement 34.10 forbids. Moving a ceiling changes only which audio is
+ *    admissible, which is exactly what 34.4 is for.
  */
 
 export const QUALITY_THRESHOLD_NAMES = [
@@ -45,6 +53,25 @@ export const QUALITY_THRESHOLD_NAMES = [
   'v2a_onset_alignment_tolerance_ms',
   /** Requirement 23.8 — fraction of confident visual events that must align. */
   'v2a_onset_alignment_rate_min',
+  /**
+   * Requirement 23.8 — the short-term RMS rise that *defines* an onset.
+   *
+   * A member rather than a constant for the same reason the other three V2A numbers
+   * are: 6.0 dB is a perceptual judgement about when a sound has "started", and
+   * Requirement 34's whole point is that such judgements are calibrated (34.7) rather
+   * than compiled in. See note 3 below on why the two *window lengths* it is measured
+   * over (5 ms and 50 ms) stay constants.
+   */
+  'v2a_onset_rise_db',
+  /**
+   * Requirements 23.8, 23.15, 23.16 — the confidence at or above which a visual
+   * event must be aligned, and below which it is ignored.
+   */
+  'v2a_visual_event_confidence_min',
+  /** Requirement 23.12 — preview audio/video start offset ceiling. */
+  'v2a_preview_sync_tolerance_ms',
+  /** Requirement 23.9 — output-vs-input duration error ceiling. */
+  'v2a_output_duration_tolerance_ms',
   /** Requirement 30.x — speech-presence RMS threshold. */
   'speech_detection_rms_threshold_db',
   /** Requirement 30.x — minimum run length before a window counts as speech. */

@@ -137,6 +137,40 @@ export const INITIAL_QUALITY_THRESHOLD_SET: QualityThresholdSet = {
       adjustableFrom: 0.5,
       adjustableTo: 1.0,
     },
+    // Requirement 23.8. The floor of 1.0 dB is the point below which frame-to-frame
+    // noise would register as an onset; the ceiling of 24.0 dB is the point above
+    // which only a transient from near-silence would.
+    v2a_onset_rise_db: {
+      name: 'v2a_onset_rise_db',
+      value: 6.0,
+      unit: 'db',
+      adjustableFrom: 1.0,
+      adjustableTo: 24.0,
+    },
+    // Requirements 23.8, 23.15, 23.16.
+    v2a_visual_event_confidence_min: {
+      name: 'v2a_visual_event_confidence_min',
+      value: 0.5,
+      unit: 'fraction',
+      adjustableFrom: 0.1,
+      adjustableTo: 0.95,
+    },
+    // Requirement 23.12.
+    v2a_preview_sync_tolerance_ms: {
+      name: 'v2a_preview_sync_tolerance_ms',
+      value: 20,
+      unit: 'ms',
+      adjustableFrom: 5,
+      adjustableTo: 100,
+    },
+    // Requirement 23.9.
+    v2a_output_duration_tolerance_ms: {
+      name: 'v2a_output_duration_tolerance_ms',
+      value: 40,
+      unit: 'ms',
+      adjustableFrom: 5,
+      adjustableTo: 200,
+    },
     // Requirement 30.x.
     speech_detection_rms_threshold_db: {
       name: 'speech_detection_rms_threshold_db',

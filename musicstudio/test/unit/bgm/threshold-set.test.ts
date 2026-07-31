@@ -34,9 +34,12 @@ import {
 
 describe('membership (Requirement 34.1)', () => {
   it('holds every threshold 34.1 enumerates', () => {
-    // 34.1's ten items, with the pack loudness range counted as its two bounds (34.2
+    // 34.1's items, with the pack loudness range counted as its two bounds (34.2
     // gives each threshold exactly one value) and bar-alignment tolerance included as
-    // the fourth co-equal loop criterion of Requirement 21.6.
+    // the fourth co-equal loop criterion of Requirement 21.6. The six `v2a_*` members
+    // are Requirement 23's numbers, added by task 2.6 for the reason
+    // `domain/quality/v2a-thresholds.ts` states: 23.8/23.9/23.12 quote them as initial
+    // values, so nothing under `domain/v2a/` may inline them.
     expect(QUALITY_THRESHOLD_NAMES).toEqual([
       'loop_seam_rms_difference_max',
       'loop_seam_sample_step_ratio_max',
@@ -48,6 +51,10 @@ describe('membership (Requirement 34.1)', () => {
       'cue_pair_similarity_max',
       'v2a_onset_alignment_tolerance_ms',
       'v2a_onset_alignment_rate_min',
+      'v2a_onset_rise_db',
+      'v2a_visual_event_confidence_min',
+      'v2a_preview_sync_tolerance_ms',
+      'v2a_output_duration_tolerance_ms',
       'speech_detection_rms_threshold_db',
       'speech_detection_min_duration_ms',
     ]);

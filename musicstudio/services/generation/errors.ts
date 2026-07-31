@@ -43,7 +43,31 @@ export type GenerationErrorCode =
    * nothing about all of them. 422 rather than 400 for the reason `bgm_loop_quality_unmet` is —
    * nothing about the request was wrong.
    */
-  | 'sfx_all_variants_failed';
+  | 'sfx_all_variants_failed'
+  /**
+   * Requirement 23.1's 1–4 variant cap.
+   *
+   * A separate code from `v2a_upload_rejected` because the two are refused at different points
+   * and for different reasons: this one is a property of the request and is decided before the
+   * upload is even probed, so a client can tell "your parameters are wrong" from "your file is".
+   */
+  | 'v2a_request_rejected'
+  /** Requirement 23.4 — see `services/sound/v2a-errors.ts` for the payload. */
+  | 'v2a_upload_rejected'
+  /**
+   * The uploaded container could not be probed at all.
+   *
+   * The case Requirement 23.4 does not quite reach: 23.4 asks for the measured value of each
+   * violated constraint, and an unreadable file yields no measurements. Same 400 status,
+   * separate code so a client can tell "your file is too long" from "your file is not a video".
+   */
+  | 'v2a_upload_unreadable'
+  /** Requirement 23.11 — the video rights confirmation of Requirement 16.14 is missing. */
+  | 'v2a_upload_consent_missing'
+  /** No foley variant survived its Requirement 23.8/23.9/23.12 verdicts. */
+  | 'v2a_generation_failed'
+  /** Requirement 23.17 — the foley job outran its 900-second budget. */
+  | 'v2a_generation_timed_out';
 
 export class GenerationError extends Error {
   readonly statusCode: number;
