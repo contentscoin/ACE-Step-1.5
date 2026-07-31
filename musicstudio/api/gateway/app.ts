@@ -4,12 +4,14 @@ import type { EngineAdapterFactoryPort } from '../../adapters/registry/ports';
 import type { ProviderRegistry } from '../../adapters/registry/provider-registry';
 import type { AccountService } from '../../services/account/account-service';
 import { systemClock, type Clock } from '../../services/clock';
+import type { CreditService } from '../../services/credit';
 import type { ReportService } from '../../services/moderation/report-service';
 
 import { createAuthenticationHook, registerAuthenticationDecorator } from './authentication';
 import { registerErrorHandler } from './error-handler';
 import { registerAccountRoutes } from './routes/account-routes';
 import { registerAuthRoutes } from './routes/auth-routes';
+import { registerCreditRoutes } from './routes/credit-routes';
 import { registerEngineRoutes } from './routes/engine-routes';
 import { registerModerationRoutes } from './routes/moderation-routes';
 
@@ -39,6 +41,8 @@ export interface GatewayDependencies {
   readonly clock?: Clock;
   readonly engines?: GatewayEngineDependencies;
   readonly moderation?: GatewayModerationDependencies;
+  /** Mounts the Requirement 2.7 / 2.9–2.11 credit read routes when supplied. */
+  readonly creditService?: CreditService;
   readonly fastifyOptions?: FastifyServerOptions;
 }
 
@@ -79,6 +83,9 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
       }
       if (deps.moderation !== undefined) {
         registerModerationRoutes(scope, { reports: deps.moderation.reports, authenticate });
+      }
+      if (deps.creditService !== undefined) {
+        registerCreditRoutes(scope, { creditService: deps.creditService, authenticate });
       }
     },
     { prefix: API_PREFIX },
