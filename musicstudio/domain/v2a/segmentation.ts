@@ -32,18 +32,15 @@
  *
  * ### The join
  *
- * Linear equal-gain cross-fade across the overlap: at position `k` of an `o`-frame overlap
- * the outgoing segment is weighted `1 − w` and the incoming one `w`, with
- * `w = (k + ½) / o`. The half-frame offset makes the ramp symmetric, so neither the seam
- * into the fade nor the seam out of it steps — an asymmetric ramp leaves a discontinuity at
- * one end, and a discontinuity is audible as the click 23.7 exists to avoid.
+ * The 50 ms equal-gain cross-fade itself now lives in `domain/audio/crossfade.ts`, because
+ * Requirements 25.11 and 25.15 ask for the same splice over dialogue chunks and lines. It
+ * is re-exported at the foot of this module, so every existing importer is unaffected and
+ * there is exactly one cross-fade implementation in the system.
  *
  * Pure and deterministic: no clock, no engine, no allocation that depends on anything but
  * the inputs. Requirement 23.14's reproducibility extends through the join because the
  * join is a function.
  */
-
-import { frameCount, windowSampleCount, type PcmAudio } from '../audio/pcm';
 
 import { V2A_SEGMENT_MAX_MS, V2A_SEGMENT_OVERLAP_MS } from './bounds';
 
@@ -152,112 +149,19 @@ export function lastSegmentExceedsOverlap(plan: SegmentPlan): boolean {
   return last.durationMs > plan.overlapMs;
 }
 
-export class SegmentJoinError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'SegmentJoinError';
-  }
-}
-
 /**
- * Requirement 23.7's cross-fade join.
+ * Requirement 23.7's cross-fade join, which lives in `domain/audio/crossfade.ts`.
  *
- * Every segment must share a sample rate and channel count; a mismatch is a programming
- * error rather than a recoverable condition, because it means two engine calls in one job
- * produced incompatible audio and joining them would silently resample or drop a channel.
- *
- * The overlap is clamped per join to the shorter of the two segments involved. Clamping
- * rather than throwing because a clamped overlap still produces continuous audio of a
- * *stated* length — `crossfadeJoin` reports the effective overlaps it used, so a caller can
- * check the joined length against Requirement 23.9 instead of against an assumption.
+ * Re-exported rather than implemented here. The 50 ms cross-fade is not V2A's alone:
+ * Requirements 25.11 and 25.15 ask for the identical splice over script chunks and
+ * re-synthesised dialogue lines, and the requirements appendix lists all three under one
+ * entry. Task 2.7 moved the implementation up to `domain/audio/` unchanged so there is one
+ * cross-fade in the system; every existing importer of `crossfadeJoin` from this module
+ * keeps working, and `V2A_SEGMENT_OVERLAP_MS` is still the overlap the V2A path passes.
  */
-export interface JoinedSegments {
-  readonly audio: PcmAudio;
-  /** Frames of overlap actually consumed at each join, in order. */
-  readonly overlapFrames: readonly number[];
-  readonly durationMs: number;
-}
-
-export function crossfadeJoin(
-  segments: readonly PcmAudio[],
-  overlapMs: number = V2A_SEGMENT_OVERLAP_MS,
-): JoinedSegments {
-  if (segments.length === 0) {
-    throw new SegmentJoinError('Requirement 23.7 joins at least one segment; received none');
-  }
-
-  const first = segments[0];
-  if (first === undefined) {
-    throw new SegmentJoinError('Requirement 23.7 joins at least one segment; received none');
-  }
-
-  const sampleRate = first.sampleRate;
-  const channels = first.channels.length;
-  for (const segment of segments) {
-    if (segment.sampleRate !== sampleRate || segment.channels.length !== channels) {
-      throw new SegmentJoinError(
-        `segments differ in shape: ${String(sampleRate)} Hz/${String(channels)} ch vs ` +
-          `${String(segment.sampleRate)} Hz/${String(segment.channels.length)} ch`,
-      );
-    }
-  }
-
-  const lengths = segments.map((segment) => frameCount(segment));
-  const nominalOverlap = windowSampleCount(sampleRate, overlapMs);
-
-  // Per-join effective overlap: never longer than either neighbour, so no join can consume
-  // a segment whole and no offset can run backwards.
-  const overlapFrames: number[] = [];
-  for (let index = 1; index < segments.length; index += 1) {
-    overlapFrames.push(
-      Math.max(0, Math.min(nominalOverlap, lengths[index] ?? 0, lengths[index - 1] ?? 0)),
-    );
-  }
-
-  const totalFrames =
-    lengths.reduce((sum, length) => sum + length, 0) -
-    overlapFrames.reduce((sum, frames) => sum + frames, 0);
-
-  const output = Array.from({ length: channels }, () => new Float32Array(Math.max(0, totalFrames)));
-
-  // `cursor` is one past the last frame written. Each new segment starts `overlap` frames
-  // *before* it, which is what makes the fade region land on audio that is already there —
-  // and what makes the joined length shorter than the sum by exactly one overlap per join.
-  let cursor = 0;
-  for (let index = 0; index < segments.length; index += 1) {
-    const segment = segments[index];
-    if (segment === undefined) continue;
-    const overlap = index === 0 ? 0 : (overlapFrames[index - 1] ?? 0);
-    const offset = index === 0 ? 0 : cursor - overlap;
-
-    for (let channel = 0; channel < channels; channel += 1) {
-      const source = segment.channels[channel] ?? new Float32Array(0);
-      const target = output[channel];
-      if (target === undefined) continue;
-
-      // The cross-fade region: what is already written fades out as the new segment fades
-      // in, both linearly, weights summing to 1 at every frame.
-      for (let k = 0; k < overlap; k += 1) {
-        const position = offset + k;
-        if (position >= target.length) break;
-        const weight = (k + 0.5) / overlap;
-        target[position] = (target[position] ?? 0) * (1 - weight) + (source[k] ?? 0) * weight;
-      }
-
-      // The rest of the segment is copied as-is.
-      for (let k = overlap; k < source.length; k += 1) {
-        const position = offset + k;
-        if (position >= target.length) break;
-        target[position] = source[k] ?? 0;
-      }
-    }
-
-    cursor = offset + (lengths[index] ?? 0);
-  }
-
-  return {
-    audio: { sampleRate, channels: output },
-    overlapFrames,
-    durationMs: sampleRate > 0 ? (Math.max(0, totalFrames) * 1000) / sampleRate : 0,
-  };
-}
+export {
+  CROSSFADE_OVERLAP_MS,
+  SegmentJoinError,
+  crossfadeJoin,
+  type JoinedSegments,
+} from '../audio/crossfade';

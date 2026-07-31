@@ -261,7 +261,10 @@ describe('the migration set still holds together', () => {
     expect(sequences).toEqual(
       Array.from({ length: migrations.length }, (_unused, index) => index + 1),
     );
-    expect(migrations.at(-1)?.id).toBe('0011_voice_consent');
+    // Position rather than "newest": task 2.7 added `0012_voice_profile`, which extends the
+    // `voice_profile` row this migration created. What matters is that 0011 sits at sequence 11
+    // with no gap either side.
+    expect(migrations[10]?.id).toBe('0011_voice_consent');
   });
 
   it('creates the three tables Requirement 26 needs', () => {

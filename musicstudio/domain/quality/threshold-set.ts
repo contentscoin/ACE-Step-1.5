@@ -186,6 +186,41 @@ export const INITIAL_QUALITY_THRESHOLD_SET: QualityThresholdSet = {
       adjustableFrom: 20,
       adjustableTo: 1_000,
     },
+    // Requirement 25.19. The floor of -90 dBFS is below the noise floor of any
+    // 16-bit delivery format, so a tighter value would find no silence at all; the
+    // ceiling of -30 dBFS is the point above which quiet speech would be trimmed.
+    dialogue_tail_silence_floor_dbfs: {
+      name: 'dialogue_tail_silence_floor_dbfs',
+      value: -60.0,
+      unit: 'dbfs',
+      adjustableFrom: -90.0,
+      adjustableTo: -30.0,
+    },
+    dialogue_tail_silence_min_ms: {
+      name: 'dialogue_tail_silence_min_ms',
+      value: 50,
+      unit: 'ms',
+      adjustableFrom: 0,
+      adjustableTo: 500,
+    },
+    dialogue_tail_silence_max_ms: {
+      name: 'dialogue_tail_silence_max_ms',
+      value: 200,
+      unit: 'ms',
+      adjustableFrom: 20,
+      adjustableTo: 2_000,
+    },
+    // Requirement 26.25. Floored at 10 ms rather than 0: a conversion is resynthesis,
+    // not a sample-for-sample transform, and a tolerance of zero would reject every
+    // real output. The ceiling of 1000 ms is the point past which "the same utterance"
+    // stops being a defensible claim about a line of speech.
+    voice_conversion_length_tolerance_ms: {
+      name: 'voice_conversion_length_tolerance_ms',
+      value: 100,
+      unit: 'ms',
+      adjustableFrom: 10,
+      adjustableTo: 1_000,
+    },
   },
 };
 

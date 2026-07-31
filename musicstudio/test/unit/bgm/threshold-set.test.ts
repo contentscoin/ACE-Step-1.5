@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { loopSeamThresholds } from '../../../domain/quality/loop-seam-thresholds';
 import {
+  dialogueTailSilenceThresholds,
+  speechPresenceThresholds,
+  voiceConversionThresholds,
+} from '../../../domain/quality/speech-thresholds';
+import {
   QUALITY_THRESHOLD_NAMES,
   QUALITY_THRESHOLD_UNITS,
   isQualityThresholdName,
@@ -39,7 +44,10 @@ describe('membership (Requirement 34.1)', () => {
     // the fourth co-equal loop criterion of Requirement 21.6. The six `v2a_*` members
     // are Requirement 23's numbers, added by task 2.6 for the reason
     // `domain/quality/v2a-thresholds.ts` states: 23.8/23.9/23.12 quote them as initial
-    // values, so nothing under `domain/v2a/` may inline them.
+    // values, so nothing under `domain/v2a/` may inline them. The three
+    // `dialogue_tail_silence_*` members and `voice_conversion_length_tolerance_ms` are
+    // Requirements 25.19 and 26.25's numbers, added by task 2.7 for the same reason —
+    // see `domain/quality/speech-thresholds.ts`.
     expect(QUALITY_THRESHOLD_NAMES).toEqual([
       'loop_seam_rms_difference_max',
       'loop_seam_sample_step_ratio_max',
@@ -57,6 +65,10 @@ describe('membership (Requirement 34.1)', () => {
       'v2a_output_duration_tolerance_ms',
       'speech_detection_rms_threshold_db',
       'speech_detection_min_duration_ms',
+      'dialogue_tail_silence_floor_dbfs',
+      'dialogue_tail_silence_min_ms',
+      'dialogue_tail_silence_max_ms',
+      'voice_conversion_length_tolerance_ms',
     ]);
   });
 
@@ -121,6 +133,48 @@ describe('initial values are Requirement 21 and 22 verbatim (Requirement 34.3)',
     expect(
       threshold(INITIAL_QUALITY_THRESHOLD_SET, 'loop_bar_alignment_tolerance_ms').unit,
     ).toBe('ms');
+  });
+});
+
+describe('the speech projections (Requirements 25.19, 26.5, 26.25, 34.3, 34.6)', () => {
+  it('reads Requirement 25.19\u2019s three numbers and the set version together', () => {
+    expect(dialogueTailSilenceThresholds(INITIAL_QUALITY_THRESHOLD_SET)).toEqual({
+      version: INITIAL_QUALITY_THRESHOLD_SET_VERSION,
+      silenceFloorDbfs: -60.0,
+      tailSilenceMinMs: 50,
+      tailSilenceMaxMs: 200,
+    });
+  });
+
+  it('reads Requirement 26.25\u2019s tolerance', () => {
+    expect(voiceConversionThresholds(INITIAL_QUALITY_THRESHOLD_SET)).toEqual({
+      version: INITIAL_QUALITY_THRESHOLD_SET_VERSION,
+      lengthToleranceMs: 100,
+    });
+  });
+
+  it('reuses Requirement 30.12\u2019s existing members for 26.5\u2019s speech regions', () => {
+    // Not new members: the glossary defines 발화 구간 by Requirement 30's rule, so 26.5 and
+    // 27.12 read the same two thresholds rather than introducing a second definition.
+    expect(speechPresenceThresholds(INITIAL_QUALITY_THRESHOLD_SET)).toEqual({
+      version: INITIAL_QUALITY_THRESHOLD_SET_VERSION,
+      speechRmsThresholdDb: -45.0,
+      speechMinDurationMs: 200,
+    });
+  });
+
+  it('carries the new version after a change', () => {
+    const change = changeThreshold(
+      INITIAL_QUALITY_THRESHOLD_SET,
+      'voice_conversion_length_tolerance_ms',
+      250,
+    );
+    if (change.kind !== 'applied') throw new Error('expected the change to apply');
+
+    expect(voiceConversionThresholds(change.set)).toEqual({
+      version: INITIAL_QUALITY_THRESHOLD_SET_VERSION + 1,
+      lengthToleranceMs: 250,
+    });
   });
 });
 

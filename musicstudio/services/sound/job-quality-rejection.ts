@@ -27,11 +27,16 @@ import type {
   BgmQualityRejectionPort,
   BgmQualityRejectionResult,
 } from './bgm-ports';
+import type {
+  SpeechFailureRejection,
+  SpeechFailureRejectionPort,
+} from '../speech/ports';
+
 import type { SfxQualityRejection, SfxQualityRejectionPort } from './sfx-ports';
 import type { V2aQualityRejection, V2aQualityRejectionPort } from './v2a-ports';
 
 /**
- * The rejection path, satisfying all three sound services' ports.
+ * The rejection path, satisfying all four services' ports.
  *
  * The implementation reads exactly two things off a rejection — the job identifier and the
  * unmet criterion names, which it joins into the failure detail — and neither depends on
@@ -49,10 +54,17 @@ import type { V2aQualityRejection, V2aQualityRejectionPort } from './v2a-ports';
  */
 export function createJobQualityRejection(
   runtime: JobRuntime,
-): BgmQualityRejectionPort & SfxQualityRejectionPort & V2aQualityRejectionPort {
+): BgmQualityRejectionPort &
+  SfxQualityRejectionPort &
+  V2aQualityRejectionPort &
+  SpeechFailureRejectionPort {
   return {
     async reject(
-      rejection: BgmQualityRejection | SfxQualityRejection | V2aQualityRejection,
+      rejection:
+        | BgmQualityRejection
+        | SfxQualityRejection
+        | V2aQualityRejection
+        | SpeechFailureRejection,
     ): Promise<BgmQualityRejectionResult> {
       const record = await runtime.store.find(rejection.jobId);
       // A job that no longer exists cannot be failed, and inventing a refund for it

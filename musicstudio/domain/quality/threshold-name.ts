@@ -76,6 +76,35 @@ export const QUALITY_THRESHOLD_NAMES = [
   'speech_detection_rms_threshold_db',
   /** Requirement 30.x — minimum run length before a window counts as speech. */
   'speech_detection_min_duration_ms',
+  /**
+   * Requirement 25.19 — the level at or below which the tail of a dialogue asset
+   * counts as silence, and the window the resulting run must land in.
+   *
+   * Three members for one criterion, by the same two rules the notes above apply.
+   * 25.19 states a *level* (-60 dBFS) and a *range* (50–200 ms): the level is the
+   * judgement about when speech has stopped, which is the same kind of judgement
+   * `speech_detection_rms_threshold_db` already is, and the range is the window the
+   * measured run is adjusted into, which needs two members for the reason note 1
+   * gives about the pack loudness window.
+   *
+   * **Open question for the spec**, the same one note 2 raises: Requirement 34.1's
+   * enumeration names 발화 판정 RMS 임계값 but not the dialogue tail, and the
+   * appendix's list of perceptual thresholds omits it too. Treating 25.19's numbers
+   * as constants would leave a plainly perceptual judgement — how much silence
+   * belongs at the end of a line of speech — unadjustable, so they are members here.
+   */
+  'dialogue_tail_silence_floor_dbfs',
+  'dialogue_tail_silence_min_ms',
+  'dialogue_tail_silence_max_ms',
+  /**
+   * Requirement 26.25 — how far a voice conversion's length may sit from its source.
+   *
+   * A member for the same reason `v2a_output_duration_tolerance_ms` is (Requirement
+   * 23.9's ±40 ms, added by task 2.6): it is a ceiling on a measured error, so moving
+   * it changes only which conversions are admissible, never what an already-recorded
+   * measurement meant. Requirement 34.1 does not name it either; see the note above.
+   */
+  'voice_conversion_length_tolerance_ms',
 ] as const;
 
 export type QualityThresholdName = (typeof QUALITY_THRESHOLD_NAMES)[number];

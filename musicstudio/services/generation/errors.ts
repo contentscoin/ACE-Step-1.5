@@ -67,7 +67,48 @@ export type GenerationErrorCode =
   /** No foley variant survived its Requirement 23.8/23.9/23.12 verdicts. */
   | 'v2a_generation_failed'
   /** Requirement 23.17 — the foley job outran its 900-second budget. */
-  | 'v2a_generation_timed_out';
+  | 'v2a_generation_timed_out'
+  /** Requirement 25.22 — see `services/speech/speech-errors.ts` for the payload. */
+  | 'dialogue_request_invalid'
+  /**
+   * Requirement 25.14 — the script has no storable line list.
+   *
+   * A separate code from `dialogue_request_invalid` because the two are about different things: a
+   * script of 30 000 characters breaks 25.4's *request* bound, and a script of one 1 500-character
+   * line breaks 25.14's *storage* bound while being a perfectly ordinary request. A client can act
+   * on the difference — split the line, versus shorten the script.
+   */
+  | 'dialogue_lines_invalid'
+  /** Requirement 25.3, carrying the engines that do support the language. */
+  | 'dialogue_language_unsupported'
+  /** Requirement 26.11 — a `preset` Voice_Profile used with an engine it is not bound to. */
+  | 'voice_profile_engine_locked'
+  /** Requirement 25.21, carrying the valid line index range. */
+  | 'dialogue_line_index_invalid'
+  /** A re-synthesis named an asset this service did not produce. */
+  | 'dialogue_asset_not_found'
+  /** Requirement 25.1 — no line could be synthesised, so no asset exists. */
+  | 'dialogue_generation_failed'
+  /** Requirement 26.25 — the conversion's length left the permitted window. */
+  | 'voice_conversion_length_unmet'
+  /** Requirement 26.24 — the conversion engine produced nothing. */
+  | 'voice_conversion_failed'
+  /** Requirement 26.24 — the source utterance named by a conversion does not exist. */
+  | 'voice_conversion_source_not_found'
+  /** Requirements 26.1–26.7 — see `services/voice/profile-errors.ts` for the payload. */
+  | 'voice_profile_request_invalid'
+  /** Requirements 26.2–26.5 — a reference sample outside the stated bounds. */
+  | 'voice_reference_sample_rejected'
+  /** A reference sample whose container could not be read at all. */
+  | 'voice_reference_sample_unreadable'
+  /** Requirements 27.5, 27.15 — see `services/transcription/errors.ts` for the payload. */
+  | 'transcription_request_invalid'
+  /** Requirement 27.16 — the engine failed, or 27.1's response budget elapsed. */
+  | 'transcription_failed'
+  /** Requirement 27.17 — a line time edit that would break 27.6, 27.7 or 27.8. */
+  | 'transcription_edit_rejected'
+  /** Requirement 27.11 — a line text edit outside 1–500 characters. */
+  | 'transcription_text_rejected';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

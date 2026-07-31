@@ -29,6 +29,7 @@ import type { AssetKind } from '../../domain/asset-kind';
 import type { EditParameters } from '../../domain/edit/request';
 import type { SfxParameters } from '../../domain/sfx/request';
 import type { SongParameters } from '../../domain/song/request';
+import type { SpeechParameters } from '../../domain/speech/request';
 import type { JobFailure } from '../../domain/generation-job/failure';
 import { isRetryableFailureClass } from '../../domain/generation-job/failure';
 import type { GenerationJobState } from '../../domain/generation-job/lifecycle';
@@ -89,6 +90,15 @@ export interface SubmitJobInput {
    * fresh request.
    */
   readonly sfx?: SfxParameters;
+  /**
+   * Validated dialogue parameters (Requirement 25).
+   *
+   * Carried through untouched, exactly like `song`, `edit` and `sfx`. It becomes part of the
+   * stored `input`, so a Requirement 6.4 retry re-asks the engine the same question — the
+   * same script line at the same rate and pitch with the same seed — which is what makes
+   * Requirement 25.18's reproducibility survive a retry rather than only a fresh request.
+   */
+  readonly speech?: SpeechParameters;
   /**
    * Content policy verdict, evaluated lazily.
    *
@@ -351,5 +361,6 @@ function normaliseInput(input: SubmitJobInput): GenerationJobRecord['input'] {
     ...(input.song === undefined ? {} : { song: input.song }),
     ...(input.edit === undefined ? {} : { edit: input.edit }),
     ...(input.sfx === undefined ? {} : { sfx: input.sfx }),
+    ...(input.speech === undefined ? {} : { speech: input.speech }),
   };
 }
