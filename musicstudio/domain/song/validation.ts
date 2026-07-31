@@ -28,7 +28,6 @@ import {
   SONG_TIME_SIGNATURES,
   isSongBatchSize,
   isSongBpm,
-  isSongDurationSeconds,
   isSongTimeSignature,
 } from './engine-bounds';
 import { VALID_KEY_SCALES, isKeyScale } from './key-scale';
@@ -49,9 +48,32 @@ export type SongValidation =
   | { readonly kind: 'valid'; readonly parameters: SongParameters }
   | { readonly kind: 'invalid'; readonly violations: readonly SongFieldViolation[] };
 
-export function validateSongRequest(request: SongGenerationRequest): SongValidation {
+/**
+ * The one bound that is not the same for every Asset_Kind.
+ *
+ * Requirement 4.2 gives a song 10–600 seconds; Requirement 21.2 gives background music
+ * 5–600. Every other bound in this module is a property of the engine's parameter space
+ * and is identical whatever is being generated, so this is the only one taken as an
+ * argument. Passing it in rather than branching on Asset_Kind keeps this module free of
+ * any knowledge of what the request is *for*.
+ */
+export interface SongDurationBounds {
+  readonly minSeconds: number;
+  readonly maxSeconds: number;
+}
+
+/** Requirement 4.2. */
+export const SONG_DURATION_BOUNDS: SongDurationBounds = {
+  minSeconds: SONG_DURATION_SECONDS_MIN,
+  maxSeconds: SONG_DURATION_SECONDS_MAX,
+};
+
+export function validateSongRequest(
+  request: SongGenerationRequest,
+  durationBounds: SongDurationBounds = SONG_DURATION_BOUNDS,
+): SongValidation {
   const violations: SongFieldViolation[] = [
-    ...validateShared(request),
+    ...validateShared(request, durationBounds),
     ...(request.mode === 'simple' ? validateSimple(request) : validateCustom(request)),
   ];
 
@@ -60,18 +82,24 @@ export function validateSongRequest(request: SongGenerationRequest): SongValidat
 }
 
 /** Fields both modes share: length, language, batch size, seed. */
-function validateShared(request: SongGenerationRequest): readonly SongFieldViolation[] {
+function validateShared(
+  request: SongGenerationRequest,
+  durationBounds: SongDurationBounds,
+): readonly SongFieldViolation[] {
   const violations: SongFieldViolation[] = [];
 
   // Requirement 4.2. Applies to Simple_Mode too: a length the caller *did* give is
   // held to the same bound whichever mode asked for it.
-  if (request.durationSeconds !== undefined && !isSongDurationSeconds(request.durationSeconds)) {
+  if (
+    request.durationSeconds !== undefined &&
+    !isWithinDurationBounds(request.durationSeconds, durationBounds)
+  ) {
     violations.push(
       rangeViolation(
         'durationSeconds',
         request.durationSeconds,
-        SONG_DURATION_SECONDS_MIN,
-        SONG_DURATION_SECONDS_MAX,
+        durationBounds.minSeconds,
+        durationBounds.maxSeconds,
         false,
       ),
     );
@@ -98,6 +126,10 @@ function validateShared(request: SongGenerationRequest): readonly SongFieldViola
   }
 
   return violations;
+}
+
+function isWithinDurationBounds(value: number, bounds: SongDurationBounds): boolean {
+  return Number.isFinite(value) && value >= bounds.minSeconds && value <= bounds.maxSeconds;
 }
 
 /** Requirement 3.5: a supplied description is 1–2000 characters. */

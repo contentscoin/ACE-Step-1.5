@@ -13,7 +13,11 @@
 
 import type { AssetKind } from '../../domain/asset-kind';
 import type { SongGenerationRequest, SongParameters } from '../../domain/song/request';
-import { validateSongRequest } from '../../domain/song/validation';
+import {
+  SONG_DURATION_BOUNDS,
+  validateSongRequest,
+  type SongDurationBounds,
+} from '../../domain/song/validation';
 import type { ModerationDecision } from '../moderation/decision';
 
 import type { JobOrchestrator, SubmitJobInput, SubmitOutcome } from './job-orchestrator';
@@ -42,6 +46,14 @@ export interface SongGatewayOptions {
   /** `song` for Requirements 3 and 4; task 2.4 reuses the gateway with `bgm`. */
   readonly assetKind?: AssetKind;
   readonly reservedLengthSeconds?: number;
+  /**
+   * Permitted output length. Requirement 4.2's 10–600 s unless overridden.
+   *
+   * The BGM_Service overrides it with Requirement 21.2's 5–600 s. It is the only
+   * per-Asset_Kind bound in the request: everything else the validator checks is a
+   * property of the engine's parameter space and does not vary by what is generated.
+   */
+  readonly durationBounds?: SongDurationBounds;
 }
 
 export interface SongSubmissionInput {
@@ -57,12 +69,14 @@ export class SongGateway {
   private readonly orchestrator: JobOrchestrator;
   private readonly assetKind: AssetKind;
   private readonly reservedLengthSeconds: number;
+  private readonly durationBounds: SongDurationBounds;
 
   constructor(options: SongGatewayOptions) {
     this.orchestrator = options.orchestrator;
     this.assetKind = options.assetKind ?? 'song';
     this.reservedLengthSeconds =
       options.reservedLengthSeconds ?? UNSPECIFIED_LENGTH_RESERVATION_SECONDS;
+    this.durationBounds = options.durationBounds ?? SONG_DURATION_BOUNDS;
   }
 
   /**
@@ -72,7 +86,7 @@ export class SongGateway {
    * never reaches routing, moderation or the credit debit.
    */
   async submit(input: SongSubmissionInput): Promise<SubmitOutcome> {
-    const validation = validateSongRequest(input.request);
+    const validation = validateSongRequest(input.request, this.durationBounds);
     if (validation.kind === 'invalid') {
       throw songRequestInvalid(validation.violations);
     }

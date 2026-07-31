@@ -41,6 +41,14 @@ export const JOB_FAILURE_REASONS = [
   'job_timeout',
   /** Requirement 20.15: one remote call exceeded its own 300 s cap. */
   'engine_timeout',
+  /**
+   * Requirement 21.18: three loop attempts, none meeting the seam criteria.
+   *
+   * Classified as `engine_error` and therefore retryable, because a different seed is
+   * exactly what Requirement 21.18 already tried and what a Requirement 6.4 retry would
+   * try again — the input was never at fault.
+   */
+  'loop_quality_unmet',
 ] as const;
 
 export type JobFailureReason = (typeof JOB_FAILURE_REASONS)[number];

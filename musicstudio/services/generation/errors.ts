@@ -27,7 +27,13 @@ export type GenerationErrorCode =
   | 'edit_task_unsupported'
   | 'edit_source_asset_not_found'
   /** Requirement 7.12 lineage refused by the design §4.2 invariants. */
-  | 'edit_lineage_rejected';
+  | 'edit_lineage_rejected'
+  /** Requirements 21.3, 21.9 — see `services/sound/bgm-errors.ts` for the payload. */
+  | 'bgm_request_invalid'
+  /** Requirement 21.18, carrying the unmet loop criteria and the refunded amount. */
+  | 'bgm_loop_quality_unmet'
+  /** Requirements 21.10, 21.11 — an intensity ladder the produced variants violate. */
+  | 'bgm_intensity_ladder_unmet';
 
 export class GenerationError extends Error {
   readonly statusCode: number;
