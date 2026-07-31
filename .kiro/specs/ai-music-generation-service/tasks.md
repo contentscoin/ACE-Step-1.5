@@ -182,7 +182,7 @@
 ## Phase 3: Audio Processing (DSP, 이펙트, 믹스다운)
 
 - [ ] 3. 오디오 처리 파이프라인 구현
-  - [ ] 3.1 DSP 기본 파이프라인 (리샘플링, 포맷 변환) 구현
+  - [x] 3.1 DSP 기본 파이프라인 (리샘플링, 포맷 변환) 구현
     - Python Celery worker 셋업 (`musicstudio/dsp/src/`, 의존성은 `musicstudio/dsp/pyproject.toml`)
     - libsoxr VHQ 리샘플링 (48kHz 정규화, 오차 ≤±10ms)
     - pydub 기반 포맷 변환 (mp3, wav, flac, ogg)
@@ -192,7 +192,7 @@
     - **수용 기준**: 비-48kHz 입력 리샘플링 후 길이 오차 ≤10ms, 포맷 변환 무손실 확인
 
 
-  - [ ] 3.2 Effects_Service 구현 (이펙트 체인, 버전 관리)
+  - [x] 3.2 Effects_Service 구현 (이펙트 체인, 버전 관리)
     - pedalboard 8종 이펙트 (Chorus, Reverb, Delay, Compressor, Gain, HPF, LPF, PitchShift)
     - 각 이펙트 파라미터 범위 검증 (설계 §5.5, Req 29.2–29.8)
     - Effect_Chain JSON 직렬화: Chain_Parser/Chain_Printer, 왕복·멱등 보장
@@ -203,7 +203,7 @@
     - _설계: §5.5, §7.1_
     - **수용 기준**: 동일 입력+체인 2회 처리 → 샘플 차이 0, 왕복 PBT 통과, 체인 동등 관계 검증
 
-  - [ ] 3.3 Mastering_Assistant 구현 (라우드니스, 대사 정리, 자동 감쇠)
+  - [x] 3.3 Mastering_Assistant 구현 (라우드니스, 대사 정리, 자동 감쇠)
     - pyloudnorm: BS.1770-4 라우드니스 측정 (K-가중, 400ms 블록, 4× 오버샘플링 TP)
     - 라우드니스 정규화: 목표값(-30~-6 LUFS, 기본 -14), TP ≤-1.0dBTP 우선
     - 멱등 속성: 재적용 시 게인 변화 ≤0.1dB
