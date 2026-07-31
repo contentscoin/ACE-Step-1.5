@@ -9,6 +9,7 @@
 import type { AssetKind } from '../domain/asset-kind';
 import type { EditParameters } from '../domain/edit/request';
 import { CANONICAL_SAMPLE_RATE } from '../domain/provenance';
+import type { SfxParameters } from '../domain/sfx/request';
 import type { SongParameters } from '../domain/song/request';
 
 import { ENGINE_JOB_STATE, type EngineJobState, type RawAudioResult } from './engine-job';
@@ -68,6 +69,21 @@ export interface NormalizedGenerationRequest {
    * and this is the statement of what the edit does with them.
    */
   readonly edit?: EditParameters;
+  /**
+   * Validated sound-effect parameters (Requirement 22), present for `sfx` requests.
+   *
+   * Present for the same reason `song` and `edit` are, and translated for the same reason:
+   * Requirements 22.10–22.12 give the sampling step count and guidance scale as *product*
+   * concepts with product ranges, and turning them into whatever field names a Woosh
+   * deployment uses stays inside `adapters/woosh/`. Nothing above the adapter layer learns
+   * an engine's spelling.
+   *
+   * Note that `seed` is not read from here. A request produces up to eight variants
+   * (22.5, 22.16), each a separate submission with a seed derived from the base
+   * (`domain/sfx/seed.ts`), so the per-submission seed is the one on `seed` above and
+   * `sfx.seed` records only what the caller named.
+   */
+  readonly sfx?: SfxParameters;
 }
 
 export interface NormalizedGenerationResult {

@@ -33,7 +33,17 @@ export type GenerationErrorCode =
   /** Requirement 21.18, carrying the unmet loop criteria and the refunded amount. */
   | 'bgm_loop_quality_unmet'
   /** Requirements 21.10, 21.11 — an intensity ladder the produced variants violate. */
-  | 'bgm_intensity_ladder_unmet';
+  | 'bgm_intensity_ladder_unmet'
+  /** Requirements 22.3, 22.18 — see `services/sound/sfx-errors.ts` for the payload. */
+  | 'sfx_request_invalid'
+  /**
+   * No variant of a sound-effect request survived.
+   *
+   * The gap Requirement 22.19 leaves: 22.19 legislates for *some* variants failing and says
+   * nothing about all of them. 422 rather than 400 for the reason `bgm_loop_quality_unmet` is —
+   * nothing about the request was wrong.
+   */
+  | 'sfx_all_variants_failed';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

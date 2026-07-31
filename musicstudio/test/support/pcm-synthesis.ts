@@ -231,3 +231,107 @@ export function compliantLoop(options: CompliantLoopOptions): {
     frequencyHz,
   };
 }
+
+
+/**
+ * Envelope level the tail window must already be below, as a fraction of the peak.
+ *
+ * 0.02 rather than the 0.05 of Requirement 22.15's initial threshold, so a buffer built by
+ * `decayingOneShot` sits inside the ceiling with margin rather than on it — a fixture that only
+ * just passes turns every unrelated arithmetic change into a mystery failure.
+ */
+const ONE_SHOT_TAIL_TARGET = 0.02;
+
+/** Requirement 22.15's window, restated here so this module needs no product import. */
+const ONE_SHOT_TAIL_WINDOW_MS = 50;
+
+export interface OneShotOptions {
+  readonly durationMs: number;
+  readonly frequencyHz?: number;
+  readonly amplitude?: number;
+  readonly sampleRate?: number;
+}
+
+/**
+ * A tone under a decaying envelope that satisfies Requirement 22.15 **by construction**.
+ *
+ * The analogue of `compliantLoop`: the shape is chosen so the criterion holds for a stateable
+ * reason rather than by luck. The envelope is `(1 − t/T)^k`, and `k` is solved from the duration
+ * so that the envelope is already at `ONE_SHOT_TAIL_TARGET` when the last 50 ms begins:
+ *
+ *     (50 / T)^k = 0.02   ⇒   k = ln(0.02) / ln(50 / T)
+ *
+ * Deriving the exponent from the length rather than fixing it is not a detail — it is the whole
+ * point, and a property test is what forced it. **A fixed exponent cannot work across
+ * Requirement 22.4's length range.** With a fixed fourth power, a 2-second effect has an envelope
+ * of `(0.025)^4 ≈ 4 × 10⁻⁷` at the start of its tail and passes easily, while a 0.1-second effect —
+ * the shortest 22.4 permits — has `(0.5)^4 = 0.0625`, above the 5 % ceiling, and fails. That is a
+ * genuine tension between 22.4's 0.1 s floor and 22.15's 50 ms window: at the floor, half the
+ * asset *is* the tail window, so the second half of the effect has to be essentially silent. See
+ * the test "the 0.1 s floor of 22.4 leaves 22.15 barely satisfiable" in
+ * `test/unit/sfx/tail-decay.test.ts`, which pins the arithmetic.
+ *
+ * For a buffer at or below twice the tail window the exponent is undefined (the whole buffer is
+ * tail) and is clamped; such a buffer cannot satisfy 22.15 unless it is silent, which is the
+ * tension above rather than a defect here.
+ */
+export function decayingOneShot(options: OneShotOptions): PcmAudio {
+  const sampleRate = options.sampleRate ?? TEST_SAMPLE_RATE;
+  const frameCount = Math.max(1, frames(options.durationMs, sampleRate));
+  const amplitude = options.amplitude ?? 0.8;
+  const step = (2 * Math.PI * (options.frequencyHz ?? 220)) / sampleRate;
+  const exponent = oneShotDecayExponent(options.durationMs);
+  const samples = new Float32Array(frameCount);
+
+  for (let index = 0; index < frameCount; index += 1) {
+    const envelope = (1 - index / frameCount) ** exponent;
+    samples[index] = amplitude * envelope * Math.sin(step * index);
+  }
+
+  return monoAudio(samples, sampleRate);
+}
+
+/** The exponent that puts the envelope at `ONE_SHOT_TAIL_TARGET` when the tail window starts. */
+export function oneShotDecayExponent(durationMs: number): number {
+  const tailFraction = ONE_SHOT_TAIL_WINDOW_MS / Math.max(durationMs, 1);
+  // A buffer no longer than the window has no room to decay inside; 2 keeps the shape sane.
+  if (!(tailFraction < 1)) return 2;
+  return Math.max(2, Math.log(ONE_SHOT_TAIL_TARGET) / Math.log(tailFraction));
+}
+
+/**
+ * A tone at constant level for its whole length — Requirement 22.15's failing case.
+ *
+ * The tail peak equals the overall peak, so the ratio is 1.0 against a 0.05 ceiling: not a
+ * marginal miss but an unambiguous one, which is what makes a test using it evidence about
+ * the rule rather than about the threshold.
+ */
+export function sustainedOneShot(options: OneShotOptions): PcmAudio {
+  const sampleRate = options.sampleRate ?? TEST_SAMPLE_RATE;
+  const frameCount = Math.max(1, frames(options.durationMs, sampleRate));
+  return monoAudio(
+    sine(options.frequencyHz ?? 220, frameCount, options.amplitude ?? 0.8, sampleRate),
+    sampleRate,
+  );
+}
+
+/**
+ * A seamless loop of `durationMs`, with no tempo — Requirement 22.14's passing case.
+ *
+ * `compliantLoop` needs a BPM and a time signature because Requirement 21.17 does. A sound
+ * effect has neither, and Requirement 22.14 asks only that the two 10 ms seam windows match
+ * in RMS — so this snaps the tone to a whole number of cycles in the requested length, which
+ * makes the head and tail windows measure identically for the reason
+ * `wholeCycleFrames` explains.
+ */
+export function seamlessSfxLoop(options: OneShotOptions): PcmAudio {
+  const sampleRate = options.sampleRate ?? TEST_SAMPLE_RATE;
+  const frequencyHz = options.frequencyHz ?? 200;
+  // The length is snapped to the tone rather than the tone to the length, so the buffer holds
+  // a whole number of cycles exactly and both seam windows sit at the same phase.
+  const frameCount = wholeCycleFrames(frequencyHz, options.durationMs, sampleRate);
+  return monoAudio(
+    sine(frequencyHz, frameCount, options.amplitude ?? 0.6, sampleRate),
+    sampleRate,
+  );
+}

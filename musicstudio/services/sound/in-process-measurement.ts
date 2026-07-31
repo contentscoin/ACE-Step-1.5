@@ -23,6 +23,11 @@ import {
 } from '../../domain/audio/pcm';
 import { BGM_EDGE_WINDOW_MS, BGM_SEAM_WINDOW_MS } from '../../domain/bgm/bounds';
 import type { ChannelLoopMeasurement, LoopMeasurement } from '../../domain/bgm/loop-seam';
+import { SFX_TAIL_WINDOW_MS } from '../../domain/sfx/bounds';
+import type {
+  ChannelTailMeasurement,
+  TailDecayMeasurement,
+} from '../../domain/sfx/tail-decay';
 
 import {
   MeasurementUnsupportedError,
@@ -30,6 +35,7 @@ import {
   type AudioShape,
   type LoopMeasurementQuery,
   type MeasurementSubject,
+  type TailDecayQuery,
 } from './measurement';
 
 export function createInProcessAudioMeasurement(): AudioMeasurementPort {
@@ -37,6 +43,7 @@ export function createInProcessAudioMeasurement(): AudioMeasurementPort {
     measureLoop: async (query) => measureLoopSync(query),
     measureLoudnessLufs: async (subject) => integratedLoudnessLufs(pcmOf(subject)),
     measureShape: async (subject) => shapeOf(pcmOf(subject)),
+    measureTailDecay: async (query) => measureTailDecaySync(query),
   };
 }
 
@@ -89,6 +96,37 @@ function measureChannel(
     overallRms: rms(channel, 0, frames),
     firstSample: channel[0] ?? 0,
     lastSample: channel[frames - 1] ?? 0,
+    peakAbs: peakAbs(channel),
+  };
+}
+
+/**
+ * Requirement 22.15's two numbers per channel. The synchronous core, as `measureLoopSync` is.
+ *
+ * The tail window is taken from the *end* of the buffer and clamped to it, so a 50 ms window
+ * over a 0.1 s effect (Requirement 22.4's floor) reads half the buffer rather than before its
+ * start — and a one-frame buffer is still measurable.
+ */
+export function measureTailDecaySync(query: TailDecayQuery): TailDecayMeasurement {
+  const audio = pcmOf(query.subject);
+  const tailSamples = windowSampleCount(
+    audio.sampleRate,
+    query.tailWindowMs ?? SFX_TAIL_WINDOW_MS,
+  );
+
+  return {
+    sampleRate: audio.sampleRate,
+    durationMs: durationMs(audio),
+    channels: audio.channels.map((channel) => measureChannelTail(channel, tailSamples)),
+  };
+}
+
+function measureChannelTail(channel: Float32Array, tailSamples: number): ChannelTailMeasurement {
+  const frames = channel.length;
+  const tail = Math.min(tailSamples, frames);
+
+  return {
+    tailPeakAbs: peakAbs(channel.subarray(frames - tail, frames)),
     peakAbs: peakAbs(channel),
   };
 }

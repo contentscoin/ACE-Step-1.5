@@ -27,6 +27,7 @@ import type { InputModality } from '../../adapters/normalized-generation';
 import { routeGenerationRequest } from '../../adapters/registry/routing';
 import type { AssetKind } from '../../domain/asset-kind';
 import type { EditParameters } from '../../domain/edit/request';
+import type { SfxParameters } from '../../domain/sfx/request';
 import type { SongParameters } from '../../domain/song/request';
 import type { JobFailure } from '../../domain/generation-job/failure';
 import { isRetryableFailureClass } from '../../domain/generation-job/failure';
@@ -78,6 +79,16 @@ export interface SubmitJobInput {
    * Requirement 7.12 lineage recorded on completion names the same parent.
    */
   readonly edit?: EditParameters;
+  /**
+   * Validated sound-effect parameters (Requirement 22).
+   *
+   * Carried through untouched, exactly like `song` and `edit`. It becomes part of the
+   * stored `input`, so a Requirement 6.4 retry re-asks the engine the same question — the
+   * same prompt at the same tier with the same step count, guidance scale and seed — which
+   * is what makes Requirement 22.8's reproducibility survive a retry rather than only a
+   * fresh request.
+   */
+  readonly sfx?: SfxParameters;
   /**
    * Content policy verdict, evaluated lazily.
    *
@@ -339,5 +350,6 @@ function normaliseInput(input: SubmitJobInput): GenerationJobRecord['input'] {
     ...(input.engineId === undefined ? {} : { engineId: input.engineId }),
     ...(input.song === undefined ? {} : { song: input.song }),
     ...(input.edit === undefined ? {} : { edit: input.edit }),
+    ...(input.sfx === undefined ? {} : { sfx: input.sfx }),
   };
 }

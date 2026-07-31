@@ -27,10 +27,24 @@ import type {
   BgmQualityRejectionPort,
   BgmQualityRejectionResult,
 } from './bgm-ports';
+import type { SfxQualityRejection, SfxQualityRejectionPort } from './sfx-ports';
 
-export function createJobQualityRejection(runtime: JobRuntime): BgmQualityRejectionPort {
+/**
+ * The rejection path, satisfying both sound services' ports.
+ *
+ * The implementation reads exactly two things off a rejection — the job identifier and the
+ * unmet criterion names, which it joins into the failure detail — and neither depends on
+ * *which* criteria they are. So Requirement 21.18's loop criteria and Requirements 22.14/22.15's
+ * SFX criteria go through the same function, and the intersection return type is how that is
+ * said in the type system rather than in a comment. Two ports, one refund path.
+ */
+export function createJobQualityRejection(
+  runtime: JobRuntime,
+): BgmQualityRejectionPort & SfxQualityRejectionPort {
   return {
-    async reject(rejection: BgmQualityRejection): Promise<BgmQualityRejectionResult> {
+    async reject(
+      rejection: BgmQualityRejection | SfxQualityRejection,
+    ): Promise<BgmQualityRejectionResult> {
       const record = await runtime.store.find(rejection.jobId);
       // A job that no longer exists cannot be failed, and inventing a refund for it
       // would credit an account for work nobody can account for.

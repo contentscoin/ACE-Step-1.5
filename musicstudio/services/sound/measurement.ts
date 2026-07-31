@@ -22,6 +22,7 @@
 
 import type { PcmAudio } from '../../domain/audio/pcm';
 import type { LoopMeasurement } from '../../domain/bgm/loop-seam';
+import type { TailDecayMeasurement } from '../../domain/sfx/tail-decay';
 
 /** What is to be measured: samples in hand, or an asset the DSP worker can open. */
 export type MeasurementSubject =
@@ -40,6 +41,12 @@ export interface LoopMeasurementQuery {
   readonly edgeWindowMs?: number;
 }
 
+export interface TailDecayQuery {
+  readonly subject: MeasurementSubject;
+  /** Requirement 22.15's window. Defaults to `SFX_TAIL_WINDOW_MS`. */
+  readonly tailWindowMs?: number;
+}
+
 export interface AudioMeasurementPort {
   /** Requirements 21.7, 21.8, 21.16, 21.17 and the 21.15 loudness, in one pass. */
   measureLoop(query: LoopMeasurementQuery): Promise<LoopMeasurement>;
@@ -47,6 +54,14 @@ export interface AudioMeasurementPort {
   measureLoudnessLufs(subject: MeasurementSubject): Promise<number>;
   /** Requirements 21.10, 21.15: length, rate and channel count. */
   measureShape(subject: MeasurementSubject): Promise<AudioShape>;
+  /**
+   * Requirement 22.15: the tail peak and the overall peak, per channel.
+   *
+   * A separate call rather than two more fields on `measureLoop`, because a one-shot sound
+   * effect has no loop point, no tempo and therefore no `LoopMeasurement` to belong to —
+   * asking for one would mean supplying a BPM for audio that has none.
+   */
+  measureTailDecay(query: TailDecayQuery): Promise<TailDecayMeasurement>;
 }
 
 export interface AudioShape {

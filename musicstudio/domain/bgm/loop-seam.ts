@@ -115,10 +115,20 @@ export interface LoopSeamVerdict {
  *
  * An asset with no channels is unsatisfiable rather than vacuously satisfied: there is
  * nothing to have measured, and reporting "fine" would admit an empty asset.
+ *
+ * `applied` names which of the four criteria this asset is subject to, and defaults to
+ * all of them. It exists because Requirement 22.14 imposes *one* of the four on a looping
+ * sound effect — the seam RMS difference — and imposes none of the other three: a sound
+ * effect has no tempo, so bar alignment (21.17) is not merely unmet but meaningless, and
+ * 22.14 says nothing about sample step or edge energy. Restricting the criteria is how
+ * `domain/sfx/loop-seam.ts` reuses this module instead of copying its arithmetic; the
+ * evidence is computed and returned either way, so an excluded criterion is still
+ * *measured* and visible, just not grounds for rejection.
  */
 export function evaluateLoopSeam(
   measurement: LoopMeasurement,
   thresholds: LoopSeamThresholds,
+  applied: readonly LoopSeamCriterion[] = LOOP_SEAM_CRITERIA,
 ): LoopSeamVerdict {
   const barAlignment = evaluateBarAlignment({
     durationMs: measurement.durationMs,
@@ -133,7 +143,7 @@ export function evaluateLoopSeam(
   if (channels.length === 0) {
     return {
       satisfied: false,
-      unmet: [...LOOP_SEAM_CRITERIA],
+      unmet: LOOP_SEAM_CRITERIA.filter((criterion) => applied.includes(criterion)),
       channels,
       barAlignment,
       thresholdSetVersion: thresholds.version,
@@ -141,6 +151,7 @@ export function evaluateLoopSeam(
   }
 
   if (
+    applied.includes('seam_rms_difference') &&
     channels.some(
       (evidence) => !(evidence.seamRmsDifferenceDb <= thresholds.seamRmsDifferenceMaxDb),
     )
@@ -149,12 +160,14 @@ export function evaluateLoopSeam(
   }
 
   if (
+    applied.includes('seam_sample_step') &&
     channels.some((evidence) => !(evidence.seamSampleStepRatio <= thresholds.seamSampleStepRatioMax))
   ) {
     unmet.push('seam_sample_step');
   }
 
   if (
+    applied.includes('edge_energy') &&
     channels.some(
       (evidence) =>
         !(evidence.headEdgeRelativeDb >= thresholds.edgeEnergyFloorDb) ||
@@ -164,7 +177,7 @@ export function evaluateLoopSeam(
     unmet.push('edge_energy');
   }
 
-  if (!barAlignment.aligned) unmet.push('bar_alignment');
+  if (applied.includes('bar_alignment') && !barAlignment.aligned) unmet.push('bar_alignment');
 
   return {
     satisfied: unmet.length === 0,
