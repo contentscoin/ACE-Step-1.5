@@ -230,7 +230,7 @@
 ## Phase 4: Timeline & Editing (타임라인, 믹스다운)
 
 - [ ] 4. 타임라인 및 믹스다운 구현
-  - [ ] 4.1 Timeline_Service 구현 (프로젝트, 클립, 되돌리기)
+  - [x] 4.1 Timeline_Service 구현 (프로젝트, 클립, 되돌리기)
     - Timeline_Project CRUD: 이름, 설명, 템포(30–300 BPM), 박자(2/3/4/6)
     - Timeline_Clip 관리: 추가, 이동, 트리밍, 분할, 복제, 삭제
     - 트랙 0–31, 클립 상한 500, 동일 트랙 겹침 방지
