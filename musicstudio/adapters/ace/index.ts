@@ -1,6 +1,7 @@
 export * from './ace-engine-adapter';
 export * from './envelope';
 export * from './errors';
+export * from './format-input';
 export * from './generation-request';
 export * from './model-tasks';
 export * from './query-result';

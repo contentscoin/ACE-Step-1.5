@@ -28,6 +28,11 @@ import {
   type InMemoryAccountRepository,
 } from './in-memory-account-repository';
 import {
+  createLyricsHarness,
+  type LyricsHarness,
+  type LyricsHarnessOptions,
+} from './lyrics-harness';
+import {
   createConfigurablePublicAssets,
   createInMemoryContentReportStore,
   type ConfigurablePublicAssets,
@@ -57,6 +62,9 @@ export interface GatewayEngineHarness {
 /** Present only when `generation` was requested (task 1.5 job routes). */
 export type GatewayGenerationHarness = GenerationHarness;
 
+/** Present only when `lyrics` was requested (task 2.3 lyric routes). */
+export type GatewayLyricsHarness = LyricsHarness;
+
 /** Present only when `moderation` was requested (task 6.1 report routes). */
 export interface GatewayModerationHarness {
   readonly reports: ReportService;
@@ -74,6 +82,7 @@ export interface GatewayHarness {
   readonly engines: GatewayEngineHarness | null;
   readonly moderation: GatewayModerationHarness | null;
   readonly generation: GatewayGenerationHarness | null;
+  readonly lyrics: GatewayLyricsHarness | null;
   close(): Promise<void>;
 }
 
@@ -98,6 +107,13 @@ export interface GatewayHarnessOptions {
    * are driven by the same time source the HTTP layer sees.
    */
   readonly generation?: Omit<GenerationHarnessOptions, 'clock'>;
+  /**
+   * Mounts the lyric enrichment, draft and LRC download routes (Requirements 8.1–8.5,
+   * 10.8) on a scripted ACE transport. No clock is shared, because none of these
+   * endpoints is time-dependent — enrichment is synchronous and an LRC file carries
+   * offsets, not instants.
+   */
+  readonly lyrics?: LyricsHarnessOptions;
 }
 
 /**
@@ -139,6 +155,8 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
       ? null
       : createGenerationHarness({ ...options.generation, clock });
 
+  const lyrics = options.lyrics === undefined ? null : createLyricsHarness(options.lyrics);
+
   const app = buildGatewayApp({
     accountService,
     clock,
@@ -146,6 +164,9 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
       ? {}
       : { engines: { registry: engines.registry, adapterFactory: engines.adapterFactory } }),
     ...(moderation === null ? {} : { moderation: { reports: moderation.reports } }),
+    ...(lyrics === null
+      ? {}
+      : { lyrics: { assistant: lyrics.assistant, timedLyrics: lyrics.timedLyrics } }),
     ...(generation === null
       ? {}
       : {
@@ -173,8 +194,17 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
     engines,
     moderation,
     generation,
+    lyrics,
     close: () => app.close(),
   };
+}
+
+/** Returns the lyrics harness, or throws if the gateway was built without one. */
+export function requireLyrics(harness: GatewayHarness): GatewayLyricsHarness {
+  if (harness.lyrics === null) {
+    throw new Error('this gateway harness was built without lyric routes');
+  }
+  return harness.lyrics;
 }
 
 /** Returns the generation harness, or throws if the gateway was built without one. */

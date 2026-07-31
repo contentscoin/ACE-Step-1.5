@@ -7,6 +7,7 @@ import type {
   AceTransport,
 } from '../../adapters/ace/transport';
 import { ACE_PATHS } from '../../adapters/ace/ace-engine-adapter';
+import { ACE_FORMAT_INPUT_PATH } from '../../adapters/ace/format-input';
 import type { SongTrackMetadata } from '../../domain/song/track-metadata';
 
 /**
@@ -33,6 +34,8 @@ export interface ScriptedAceTransport extends AceTransport {
   failNext(path: string, httpStatus: number, error?: string): void;
   /** Serve this byte content for any `/v1/audio` download of `filePath`. */
   setAudio(filePath: string, content: Buffer): void;
+  /** Reply to `/format_input` with this `data` payload (Requirement 8.1). */
+  setFormattedSample(sample: AceScriptedFormattedSample): void;
   setHealthy(healthy: boolean): void;
   readonly jsonRequests: readonly AceJsonRequest[];
   readonly binaryRequests: readonly AceBinaryRequest[];
@@ -59,6 +62,24 @@ export interface AceScriptedAudio {
   readonly metadata?: Partial<SongTrackMetadata>;
 }
 
+/**
+ * One `/format_input` answer, spelled with the engine's own field names.
+ *
+ * Reproduces the `data` object of `acestep/api/http/sample_format_routes.py`
+ * verbatim — note `key_scale` and `time_signature` here versus `keyscale` and
+ * `timesignature` in `/query_result` — so a decoding bug in `format-input.ts`
+ * surfaces in a test rather than against a running engine.
+ */
+export interface AceScriptedFormattedSample {
+  readonly caption?: unknown;
+  readonly lyrics?: unknown;
+  readonly bpm?: unknown;
+  readonly key_scale?: unknown;
+  readonly time_signature?: unknown;
+  readonly duration?: unknown;
+  readonly vocal_language?: unknown;
+}
+
 const RUNNING: AceScriptedResult = { statusCode: 0, progress: 0.25 };
 
 export function createScriptedAceTransport(): ScriptedAceTransport {
@@ -71,6 +92,17 @@ export function createScriptedAceTransport(): ScriptedAceTransport {
   let taskId = 'ace-task-1';
   let queuePosition = 1;
   let healthy = true;
+  // The engine's own fallbacks (`format_result.caption or prompt`) mean a real reply
+  // always carries the seven keys; the default here mirrors a minimal such reply.
+  let formattedSample: AceScriptedFormattedSample = {
+    caption: 'a formatted caption',
+    lyrics: '[Verse]\nformatted verse\n\n[Chorus]\nformatted chorus',
+    bpm: 120,
+    key_scale: 'C major',
+    time_signature: '4',
+    duration: 180,
+    vocal_language: 'en',
+  };
 
   const envelope = (data: unknown): AceEnvelope => ({
     data,
@@ -99,6 +131,9 @@ export function createScriptedAceTransport(): ScriptedAceTransport {
     },
     setAudio(filePath, content) {
       audio.set(filePath, content);
+    },
+    setFormattedSample(sample) {
+      formattedSample = sample;
     },
     setHealthy(next) {
       healthy = next;
@@ -147,6 +182,10 @@ export function createScriptedAceTransport(): ScriptedAceTransport {
           httpStatus: 200,
           envelope: envelope(ids.map((id) => resultItemFor(id, answer))),
         };
+      }
+
+      if (request.path === ACE_FORMAT_INPUT_PATH) {
+        return { httpStatus: 200, envelope: envelope(formattedSample) };
       }
 
       if (request.path === ACE_PATHS.health) {

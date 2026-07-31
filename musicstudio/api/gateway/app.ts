@@ -10,6 +10,8 @@ import type { JobEventBusPort } from '../../services/generation/job-events';
 import type { JobOrchestrator } from '../../services/generation/job-orchestrator';
 import type { JobRuntime } from '../../services/generation/runtime';
 import type { SongGateway } from '../../services/generation/song-gateway';
+import type { LyricsAssistant } from '../../services/lyrics/lyrics-assistant';
+import type { TimedLyricsService } from '../../services/lyrics/timed-lyrics-service';
 import type { ReportService } from '../../services/moderation/report-service';
 
 import { createAuthenticationHook, registerAuthenticationDecorator } from './authentication';
@@ -20,6 +22,7 @@ import { registerCreditRoutes } from './routes/credit-routes';
 import { registerEditRoutes } from './routes/edit-routes';
 import { registerEngineRoutes } from './routes/engine-routes';
 import { registerGenerationRoutes } from './routes/generation-routes';
+import { registerLyricsRoutes } from './routes/lyrics-routes';
 import { registerModerationRoutes } from './routes/moderation-routes';
 import { registerSongRoutes } from './routes/song-routes';
 
@@ -74,11 +77,30 @@ export interface GatewayGenerationDependencies {
   readonly editGateway?: EditGateway;
 }
 
+/**
+ * Lyrics_Assistant wiring (Requirements 8, 10.8), optional like the blocks above.
+ *
+ * Independent of `generation`: enrichment creates no Generation_Job and charges
+ * nothing (Requirement 8.6), so a composition can offer lyric help without the
+ * generation surface, and the Requirement 8 tests need no orchestrator.
+ *
+ * `timedLyrics` is separately optional because Requirement 10.8's download depends on
+ * timings that Transcription_Service (task 2.7) produces; without that source there
+ * is nothing to serve, and mounting a route that always answers 404 would be worse
+ * than not mounting it.
+ */
+export interface GatewayLyricsDependencies {
+  readonly assistant: LyricsAssistant;
+  readonly timedLyrics?: TimedLyricsService;
+}
+
 export interface GatewayDependencies {
   readonly accountService: AccountService;
   readonly clock?: Clock;
   readonly engines?: GatewayEngineDependencies;
   readonly moderation?: GatewayModerationDependencies;
+  /** Mounts the Requirement 8 / 10.8 lyric routes when supplied. */
+  readonly lyrics?: GatewayLyricsDependencies;
   /** Mounts the Requirement 5 job lifecycle routes when supplied. */
   readonly generation?: GatewayGenerationDependencies;
   /** Mounts the Requirement 2.7 / 2.9–2.11 credit read routes when supplied. */
@@ -126,6 +148,15 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
       }
       if (deps.creditService !== undefined) {
         registerCreditRoutes(scope, { creditService: deps.creditService, authenticate });
+      }
+      if (deps.lyrics !== undefined) {
+        registerLyricsRoutes(scope, {
+          assistant: deps.lyrics.assistant,
+          authenticate,
+          ...(deps.lyrics.timedLyrics === undefined
+            ? {}
+            : { timedLyrics: deps.lyrics.timedLyrics }),
+        });
       }
       if (deps.generation !== undefined) {
         registerGenerationRoutes(scope, {
