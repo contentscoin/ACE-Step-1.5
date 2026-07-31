@@ -49,6 +49,12 @@ from .formats import AudioFormat, decode, encode
 from .loudness import measure
 from .mastering import clean_dialogue, duck, normalise_loudness
 from .mfcc import CUE_PAIR_SIMILARITY_CEILING, mfcc_vector, similarity_report
+from .mixdown import (
+    MixdownClip,
+    RenderParams,
+    TrackState,
+    render_mixdown,
+)
 from .pipeline import (
     STORAGE_FORMAT,
     convert_for_download,
@@ -73,6 +79,7 @@ __all__ = [
     "measure_loudness_task",
     "normalise_for_storage_task",
     "normalise_loudness_task",
+    "render_mixdown_task",
 ]
 
 #: Overridden per environment. Design §11.3's topology supplies the real one.
@@ -167,6 +174,79 @@ def apply_effect_chain_task(
         "tail_truncated": result.tail_truncated,
     }
 
+
+
+@celery_app.task(name="musicstudio_dsp.render_mixdown")
+def render_mixdown_task(
+    clips: list[dict[str, Any]],
+    tracks: list[dict[str, Any]] | None = None,
+    sample_rate: int = 48_000,
+    channels: int = 2,
+    normalise_peak: bool = True,
+    audio_format: AudioFormat = STORAGE_FORMAT,
+) -> dict[str, Any]:
+    """Requirements 28.24–28.29. Shell over :func:`mixdown.render_mixdown`.
+
+    ``clips`` is the **render target set**, already decided by Requirements 28.19 and 28.20
+    in the product layer (``domain/timeline/render-target.ts``). The task does not receive a
+    project and cannot re-derive the selection: a worker that recomputed it could disagree
+    with the decision the request was refused or accepted on, and a mute toggled between the
+    two would render something nobody asked for.
+
+    Each clip entry carries its own audio, its placement and its per-clip settings; ``tracks``
+    carries Requirement 28.18's volume and pan for the tracks in play. The clip order in the
+    payload is irrelevant by design — :func:`mixdown.render_mixdown` sorts by clip id, which
+    is what Requirements 28.26 and 28.27 rest on.
+
+    The attenuation of Requirement 28.28 comes back rather than being applied and forgotten,
+    because 28.28 requires it in both the response and the ``mix`` asset's metadata, and only
+    the product layer writes assets.
+    """
+    params = RenderParams(
+        sample_rate=int(sample_rate), channels=int(channels), normalise_peak=bool(normalise_peak)
+    )
+    track_states = {
+        int(entry["track"]): TrackState(
+            volume_db=float(entry.get("volume_db", 0.0)),
+            pan=float(entry.get("pan", 0.0)),
+        )
+        for entry in (tracks or [])
+    }
+    result = render_mixdown(
+        [
+            MixdownClip(
+                clip_id=str(entry["clip_id"]),
+                track=int(entry["track"]),
+                audio=decode(base64.b64decode(entry["audio_base64"])),
+                start_time_ms=int(entry["start_time_ms"]),
+                play_length_ms=int(entry["play_length_ms"]),
+                trim_start_ms=int(entry.get("trim_start_ms", 0)),
+                trim_end_ms=int(entry.get("trim_end_ms", 0)),
+                gain_db=float(entry.get("gain_db", 0.0)),
+                fade_in_ms=int(entry.get("fade_in_ms", 0)),
+                fade_out_ms=int(entry.get("fade_out_ms", 0)),
+            )
+            for entry in clips
+        ],
+        track_states,
+        params,
+    )
+    return {
+        "audio_base64": base64.b64encode(encode(result.audio, audio_format)).decode("ascii"),
+        "audio_format": audio_format,
+        "sample_rate": result.audio.sample_rate,
+        "channels": result.audio.channel_count,
+        "frame_count": result.audio.frame_count,
+        "duration_ms": result.duration_ms,
+        "rendered_clip_ids": list(result.rendered_clip_ids),
+        "requested_length_ms": result.requested_length_ms,
+        "length_error_ms": result.length_error_ms,
+        "peak_before": result.peak_before,
+        "peak_after": result.peak_after,
+        "attenuation_db": result.attenuation_db,
+        "normalised": result.normalisation.applied,
+        "attenuation_within_reportable_range": result.normalisation.within_reportable_range,
+    }
 
 
 @celery_app.task(name="musicstudio_dsp.measure_loudness")

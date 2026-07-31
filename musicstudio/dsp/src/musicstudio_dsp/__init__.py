@@ -11,8 +11,9 @@ Design §5.5's processing sits on top: the eight effects of Requirement 29.1
 (:mod:`musicstudio_dsp.effects`), BS.1770-4 loudness and true peak over
 ``pyloudnorm`` (:mod:`musicstudio_dsp.loudness`), and Requirement 30's
 normalisation, dialogue cleanup and auto-ducking
-(:mod:`musicstudio_dsp.mastering`). Onset detection and the mixdown chain are
-added by the tasks that own them.
+(:mod:`musicstudio_dsp.mastering`). Design §6.1's deterministic timeline
+mixdown is :mod:`musicstudio_dsp.mixdown`. Onset detection is added by the task
+that owns it.
 
 :mod:`musicstudio_dsp.worker` is the only module that imports Celery, and it is
 imported lazily by nothing else, so the pipeline is usable and testable with no

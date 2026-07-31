@@ -2,6 +2,7 @@ export * from './bounds';
 export * from './commands';
 export * from './equivalence';
 export * from './history';
+export * from './mixdown';
 export * from './playhead';
 export * from './project';
 export * from './project-parser';

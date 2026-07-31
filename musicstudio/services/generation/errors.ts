@@ -143,7 +143,39 @@ export type GenerationErrorCode =
   /** Requirement 28.34 — a clip referencing an Audio_Asset that does not exist. */
   | 'timeline_asset_not_found'
   /** Requirement 28.31 — a JSON project document that could not be parsed. */
-  | 'timeline_project_document_invalid';
+  | 'timeline_project_document_invalid'
+  /** Requirement 28.29's 렌더링 대상 부재 사유 코드, carrying which of the two cases it was. */
+  | 'mixdown_no_render_target'
+  /**
+   * Requirement 28.25's length is longer than an `Audio_Asset` may be (Requirement 19.11).
+   *
+   * 409 and checked *before* the render: nothing about the request is malformed, the project
+   * is simply too long to store the result of, and the same request succeeds once it is
+   * shortened. Refusing early also means an hour-long render is not paid for twice.
+   */
+  | 'mixdown_length_unsupported'
+  /**
+   * The mix would have more direct input assets than Requirement 19.6 permits.
+   *
+   * Requirement 28.5 allows 500 clips and 19.6 caps an asset's direct inputs at 64, so a
+   * project drawing on 65 distinct assets cannot be stored as one `mix`. Reported rather
+   * than truncated: a lineage missing an input is worse than a refusal, because Requirement
+   * 33.20's licence fold reads exactly that list. **Open question for the spec** — see the
+   * task 4.2 report.
+   */
+  | 'mixdown_input_limit_exceeded'
+  /**
+   * The renderer did not keep one of its own invariants (Requirements 28.24–28.27).
+   *
+   * One code with a `breach` field rather than four codes, for the reason
+   * `timeline_edit_rejected` is one code: a client cannot act differently on any of them —
+   * they are all "the service failed to keep its promise" — and the payload is what a
+   * developer needs. 500 for the reason `sound_pack_export_failed` is 500: this is not a
+   * quality miss the user can regenerate around.
+   */
+  | 'mixdown_render_invariant_breached'
+  /** The `mix` `Audio_Asset` built from a successful render failed Requirement 19's rules. */
+  | 'mixdown_asset_invalid';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

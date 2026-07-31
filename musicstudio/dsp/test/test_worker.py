@@ -35,6 +35,7 @@ from musicstudio_dsp.worker import (
     measure_loudness_task,
     normalise_for_storage_task,
     normalise_loudness_task,
+    render_mixdown_task,
 )
 
 TASK_NAMES = (
@@ -49,6 +50,9 @@ TASK_NAMES = (
     # Task 3.4's sound-pack shells (Requirements 24.7, 24.9, 24.10, 24.11).
     "musicstudio_dsp.cue_pack_similarity",
     "musicstudio_dsp.export_sound_pack",
+    # Task 4.2's mixdown shell (Requirements 28.24–28.29). Appended rather than inserted in
+    # pipeline order, because `test_task_names_match_their_functions` indexes this tuple.
+    "musicstudio_dsp.render_mixdown",
 )
 
 
@@ -74,6 +78,7 @@ class TestApplication:
         assert duck_task.name == TASK_NAMES[6]
         assert cue_pack_similarity_task.name == TASK_NAMES[7]
         assert export_sound_pack_task.name == TASK_NAMES[8]
+        assert render_mixdown_task.name == TASK_NAMES[9]
 
     def test_registers_no_task_this_tuple_does_not_name(self) -> None:
         # The tuple is exhaustive on purpose: a task added without extending it would be a
@@ -442,3 +447,80 @@ class TestExportSoundPackTask:
         import json
 
         json.dumps(export_sound_pack_task.run([self.cue("drop", 830)], "{}"))
+
+
+
+class TestRenderMixdownTask:
+    """The mixdown shell (Requirements 28.24–28.29). Behaviour lives in ``test_mixdown.py``."""
+
+    def clip(
+        self, clip_id: str, track: int, start_time_ms: int, play_length_ms: int = 100
+    ) -> dict[str, object]:
+        return {
+            "clip_id": clip_id,
+            "track": track,
+            "audio_base64": base64.b64encode(
+                wav_bytes(INTERNAL_SAMPLE_RATE, int(INTERNAL_SAMPLE_RATE * 0.1))
+            ).decode("ascii"),
+            "start_time_ms": start_time_ms,
+            "play_length_ms": play_length_ms,
+        }
+
+    def test_round_trips_the_base64_transport_encoding(self) -> None:
+        result = render_mixdown_task.run([self.clip("clip-a", 0, 0)])
+
+        decoded = decode(base64.b64decode(result["audio_base64"]))
+        assert decoded.sample_rate == INTERNAL_SAMPLE_RATE
+        assert decoded.channel_count == 2
+
+    def test_reports_the_length_requirement_28_25_states(self) -> None:
+        result = render_mixdown_task.run(
+            [self.clip("clip-a", 0, 0), self.clip("clip-b", 1, 200)]
+        )
+        assert result["requested_length_ms"] == 300.0
+        assert result["length_error_ms"] <= 10.0
+
+    def test_sums_in_clip_id_order_whatever_order_the_payload_arrives_in(self) -> None:
+        # Requirements 28.26, 28.27: the payload order is exactly what must not matter.
+        forward = render_mixdown_task.run(
+            [self.clip("clip-a", 0, 0), self.clip("clip-b", 1, 0)]
+        )
+        reverse = render_mixdown_task.run(
+            [self.clip("clip-b", 1, 0), self.clip("clip-a", 0, 0)]
+        )
+        assert forward["rendered_clip_ids"] == ["clip-a", "clip-b"]
+        assert reverse["rendered_clip_ids"] == ["clip-a", "clip-b"]
+        assert forward["audio_base64"] == reverse["audio_base64"]
+
+    def test_reports_the_attenuation_requirement_28_28_needs_recorded(self) -> None:
+        # Four full-scale clips on four tracks overshoot 1.0, so an attenuation is applied
+        # and must come back — 28.28 requires it in the response *and* on the asset, and only
+        # the product layer writes assets.
+        clips = [self.clip(f"clip-{index}", index, 0) for index in range(4)]
+        result = render_mixdown_task.run(clips)
+        assert result["normalised"] is True
+        assert result["attenuation_db"] > 0.0
+        assert result["attenuation_within_reportable_range"] is True
+        assert 0.99 <= result["peak_after"] <= 1.0
+
+    def test_applies_track_volume_from_the_payload(self) -> None:
+        loud = render_mixdown_task.run([self.clip("clip-a", 3, 0)])
+        quiet = render_mixdown_task.run(
+            [self.clip("clip-a", 3, 0)], [{"track": 3, "volume_db": -20.0}]
+        )
+        assert quiet["peak_after"] < loud["peak_after"]
+
+    def test_refuses_an_empty_render_target_set(self) -> None:
+        from musicstudio_dsp.mixdown import EmptyRenderError
+
+        # Requirement 28.29. The product layer refuses this before queueing (see
+        # `services/timeline/mixdown-renderer.ts`); the worker refuses it too, because a task
+        # accepts whatever is on the queue.
+        with pytest.raises(EmptyRenderError):
+            render_mixdown_task.run([])
+
+    def test_result_is_json_serialisable(self) -> None:
+        import json
+
+        result = render_mixdown_task.run([self.clip("clip-a", 0, 0)])
+        assert json.loads(json.dumps(result))["audio_format"] == "flac"

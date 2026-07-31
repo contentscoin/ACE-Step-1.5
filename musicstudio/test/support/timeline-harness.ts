@@ -46,6 +46,7 @@ import {
   TRACK_VOLUME_DB_MIN,
   fadeCeilingMs,
 } from '../../domain/timeline/bounds';
+import { NO_ATTRIBUTION_REQUIRED, type AssetProvenance } from '../../domain/provenance';
 import { createHistory } from '../../domain/timeline/history';
 import {
   defaultTrackSettings,
@@ -53,6 +54,13 @@ import {
   type TimelineProject,
   type TrackSettings,
 } from '../../domain/timeline/project';
+import type {
+  MixdownAssetStore,
+  MixdownRenderPort,
+  MixdownRenderRequest,
+  MixdownRenderResult,
+  StoredMix,
+} from '../../services/timeline/mixdown-ports';
 import type {
   TimelineAssetCatalogue,
   TimelineAssetState,
@@ -313,6 +321,90 @@ export function clip(overrides: Partial<TimelineClip> = {}): TimelineClip {
     fadeInMs: 0,
     fadeOutMs: 0,
     muted: false,
+    ...overrides,
+  };
+}
+
+
+/* ------------------------------------------------ Mixdown_Renderer (28.24–28.29) */
+
+/**
+ * A stub `MixdownRenderPort`, and it is a stub on purpose.
+ *
+ * The audio half of Requirements 28.24–28.28 — the samples, the summation order's effect on
+ * them, the attenuation coefficient's application — is rendered in
+ * `dsp/src/musicstudio_dsp/mixdown.py` and asserted there, as design §10's Properties 12 and
+ * 13 (`dsp/test/test_mixdown.py`). No buffer ever crosses this seam, so a fake that mixed
+ * real audio in TypeScript would be a *second renderer*, and the two would drift.
+ *
+ * What the stub is for is the half that cannot be tested from Python: that an empty target set
+ * is refused **before** the port is called at all (Requirement 28.29), that the clips arrive in
+ * summation order (28.26), and that a result breaching a stated invariant is reported rather
+ * than stored. The default result is derived from the request — the length from
+ * `expectedLengthMs`, the order from the clips as sent — so a test that wants to breach an
+ * invariant has to say so explicitly through `overrides`.
+ */
+export function stubMixdownRenderPort(overrides: Partial<MixdownRenderResult> = {}): {
+  readonly port: MixdownRenderPort;
+  readonly requests: MixdownRenderRequest[];
+} {
+  const requests: MixdownRenderRequest[] = [];
+  return {
+    requests,
+    port: {
+      render: (request) => {
+        requests.push(request);
+        const frameCount = Math.round(
+          (request.expectedLengthMs * request.params.sampleRate) / 1000,
+        );
+        return Promise.resolve({
+          objectKey: `mixes/${request.projectId}.flac`,
+          sampleRate: request.params.sampleRate,
+          channels: request.params.channels,
+          frameCount,
+          durationMs: request.expectedLengthMs,
+          renderedClipIds: request.clips.map((clip) => clip.clipId),
+          peakBefore: 0.5,
+          peakAfter: 0.5,
+          attenuationDb: 0,
+          normalised: false,
+          ...overrides,
+        });
+      },
+    },
+  };
+}
+
+/** A `MixdownAssetStore` that records what it was asked to save. */
+export function recordingMixAssetStore(): MixdownAssetStore & {
+  readonly saved: StoredMix[];
+} {
+  const saved: StoredMix[] = [];
+  return {
+    saved,
+    save: (mix) => {
+      saved.push(mix);
+      return Promise.resolve();
+    },
+  };
+}
+
+/**
+ * Provenance for a rendered mix.
+ *
+ * Supplied by the caller rather than invented by the renderer, because Requirement 33.20's
+ * fold over input assets and engines is task 6.3's (Property 18). See
+ * `services/timeline/mixdown-renderer.ts`.
+ */
+export function mixProvenance(overrides: Partial<AssetProvenance> = {}): AssetProvenance {
+  return {
+    engineId: 'musicstudio-mixdown',
+    weightLicenseId: 'not-applicable',
+    attributionText: NO_ATTRIBUTION_REQUIRED,
+    commercialUseAllowed: true,
+    nonCommercialLicenseListVersion: 1,
+    recordedAtMs: 1_000,
+    aiGenerated: true,
     ...overrides,
   };
 }
