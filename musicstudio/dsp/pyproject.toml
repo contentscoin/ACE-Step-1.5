@@ -22,6 +22,21 @@ dependencies = [
     # system dependency, and only `worker.py` imports it — the pipeline functions
     # are broker-free by construction, so tests never reach a connection.
     "celery>=5.4",
+    # Design §5.5's effect library: the eight kinds of Requirement 29.1
+    # (dsp/src/musicstudio_dsp/effects.py). In the default set rather than the
+    # `audio` extra for the same reason `soxr` and `celery` are — **CI runs
+    # `pip install -e '.[dev]'` only**, so anything the ordinary test suite needs
+    # must be resolvable by that command, and the effects tests are ordinary tests.
+    #
+    # It qualifies: a self-contained manylinux_2_28 wheel, ~5 MB, whose only Python
+    # dependency is numpy. It is not *quite* as free-standing as `soxr` — the native
+    # extension links `libatomic.so.1`, which the wheel does not bundle. That library
+    # is part of the GCC runtime and is present on the `ubuntu-latest` runner this
+    # project's CI uses, so no workflow change is needed. Because it is nevertheless a
+    # platform dependency rather than a wheel dependency, `effects.pedalboard_available`
+    # exists and the effects tests skip with a stated reason on a host without it,
+    # rather than failing collection.
+    "pedalboard>=0.9.12",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +52,6 @@ dependencies = [
 # stated, when no binary is present.
 audio = [
     "librosa>=0.10.2",
-    "pedalboard>=0.9.12",
     "pyloudnorm>=0.1.1",
     "pydub>=0.25.1",
 ]

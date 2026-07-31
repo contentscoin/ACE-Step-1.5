@@ -44,7 +44,8 @@ from typing import Any, Final
 
 from celery import Celery
 
-from .formats import AudioFormat
+from .effects import apply_chain, parse_chain
+from .formats import AudioFormat, decode, encode
 from .pipeline import (
     STORAGE_FORMAT,
     convert_for_download,
@@ -54,6 +55,7 @@ from .pipeline import (
 __all__ = [
     "DEFAULT_BROKER_URL",
     "DEFAULT_RESULT_BACKEND",
+    "apply_effect_chain_task",
     "celery_app",
     "convert_for_download_task",
     "normalise_for_storage_task",
@@ -119,4 +121,34 @@ def convert_for_download_task(
         "duration_ms": result.audio.duration_ms,
         "lossless": result.lossless,
         "length_error_ms": result.resample.length_error_ms,
+    }
+
+
+
+@celery_app.task(name="musicstudio_dsp.apply_effect_chain")
+def apply_effect_chain_task(
+    audio_base64: str, chain_document: str, audio_format: AudioFormat = STORAGE_FORMAT
+) -> dict[str, Any]:
+    """Requirements 29.12, 29.29–29.32. Shell over :func:`effects.apply_chain`.
+
+    The chain arrives as a JSON *string* rather than as a decoded list, so that the
+    task's transport encoding is the same document Requirement 29.24's ``Chain_Printer``
+    produces and Requirement 29.33's ``Chain_Parser`` accepts. A pre-decoded list would
+    let the JSON serialiser on the queue reshape numbers before
+    :func:`effects.validate_chain` ever saw them.
+
+    Requirement 29.28's preview and Requirement 29.14's version write are both the
+    product layer's decisions (``services/effects/``): this task returns processed
+    audio and says nothing about whether it should be stored.
+    """
+    result = apply_chain(decode(base64.b64decode(audio_base64)), parse_chain(chain_document))
+    return {
+        "audio_base64": base64.b64encode(encode(result.audio, audio_format)).decode("ascii"),
+        "audio_format": audio_format,
+        "sample_rate": result.audio.sample_rate,
+        "channels": result.audio.channel_count,
+        "frame_count": result.audio.frame_count,
+        "duration_ms": result.duration_ms,
+        "original_duration_ms": result.original_duration_ms,
+        "tail_truncated": result.tail_truncated,
     }

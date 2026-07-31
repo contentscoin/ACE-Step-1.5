@@ -1,0 +1,92 @@
+{
+  "_comment": [
+    "Effect vocabulary and parameter ranges — Requirements 29.1-29.8.",
+    "",
+    "This file is the DSP worker's ONLY declaration of these numbers: effects.py loads it",
+    "rather than restating them, so the worker cannot drift from the product layer by",
+    "editing a constant. The TypeScript side declares the same table in",
+    "domain/effects/registry.ts, and test/unit/effects/registry-parity.test.ts compares",
+    "the two in both directions (every kind, every parameter name, every bound), so a",
+    "change on either side that is not mirrored here fails `npm test`.",
+    "",
+    "It lives inside the Python package, not under domain/, so that it ships in the wheel",
+    "built by `pip install -e .` — a file under domain/ would be absent from an installed",
+    "worker.",
+    "",
+    "Parameter names are pedalboard's keyword arguments, quoted verbatim from the",
+    "requirement text. effects.py splats them straight into the constructors, so there is",
+    "no name-mapping table to fall out of step.",
+    "",
+    "extends_tail marks the two effects that can lengthen the signal (delay, reverb):",
+    "Requirement 29.30 exempts a chain containing either from length preservation, and",
+    "29.32 gives such a chain a 10-second tail allowance instead."
+  ],
+  "chain_item_count_min": 1,
+  "chain_item_count_max": 16,
+  "parameter_tolerance": 0.000001,
+  "tail_allowance_ms": 10000,
+  "length_tolerance_ms": 10,
+  "effects": {
+    "chorus": {
+      "extends_tail": false,
+      "parameters": {
+        "rate_hz": { "min": 0.01, "max": 20 },
+        "depth": { "min": 0.0, "max": 1.0 },
+        "feedback": { "min": 0.0, "max": 0.95 },
+        "centre_delay_ms": { "min": 0.5, "max": 50 },
+        "mix": { "min": 0.0, "max": 1.0 }
+      }
+    },
+    "reverb": {
+      "extends_tail": true,
+      "parameters": {
+        "room_size": { "min": 0.0, "max": 1.0 },
+        "damping": { "min": 0.0, "max": 1.0 },
+        "wet_level": { "min": 0.0, "max": 1.0 },
+        "dry_level": { "min": 0.0, "max": 1.0 },
+        "width": { "min": 0.0, "max": 1.0 }
+      }
+    },
+    "delay": {
+      "extends_tail": true,
+      "parameters": {
+        "delay_seconds": { "min": 0.01, "max": 2.0 },
+        "feedback": { "min": 0.0, "max": 0.95 },
+        "mix": { "min": 0.0, "max": 1.0 }
+      }
+    },
+    "compressor": {
+      "extends_tail": false,
+      "parameters": {
+        "threshold_db": { "min": -60, "max": 0 },
+        "ratio": { "min": 1.0, "max": 20.0 },
+        "attack_ms": { "min": 0.1, "max": 100 },
+        "release_ms": { "min": 10, "max": 1000 }
+      }
+    },
+    "gain": {
+      "extends_tail": false,
+      "parameters": {
+        "gain_db": { "min": -40, "max": 40 }
+      }
+    },
+    "highpass": {
+      "extends_tail": false,
+      "parameters": {
+        "cutoff_frequency_hz": { "min": 20, "max": 8000 }
+      }
+    },
+    "lowpass": {
+      "extends_tail": false,
+      "parameters": {
+        "cutoff_frequency_hz": { "min": 200, "max": 20000 }
+      }
+    },
+    "pitch_shift": {
+      "extends_tail": false,
+      "parameters": {
+        "semitones": { "min": -12, "max": 12 }
+      }
+    }
+  }
+}

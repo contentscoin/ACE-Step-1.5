@@ -138,7 +138,14 @@ describe('the migration set still holds together', () => {
     expect(sequences).toEqual(
       Array.from({ length: migrations.length }, (_unused, index) => index + 1),
     );
-    expect(migrations.at(-1)?.id).toBe('0012_voice_profile');
+    // Presence and uniqueness, not "0012 is the highest-numbered migration". The
+    // gap-free check above is the invariant that matters — it is what guarantees every
+    // file runs on a fresh database. Pinning 0012 as the *last* migration would instead
+    // be a claim about the future that the next feature to add a table invalidates,
+    // which is what happened when task 3.2 added `0013_effect_preset`.
+    expect(migrations.filter((candidate) => candidate.id === '0012_voice_profile')).toHaveLength(
+      1,
+    );
   });
 
   it('reports every Requirement 26 invariant under one SQLSTATE class', () => {

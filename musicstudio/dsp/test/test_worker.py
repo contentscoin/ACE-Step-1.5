@@ -23,7 +23,9 @@ import pytest
 from musicstudio_dsp.audio_buffer import AudioBuffer
 from musicstudio_dsp.formats import decode, encode
 from musicstudio_dsp.resample import INTERNAL_SAMPLE_RATE
+from musicstudio_dsp.effects import pedalboard_available
 from musicstudio_dsp.worker import (
+    apply_effect_chain_task,
     celery_app,
     convert_for_download_task,
     normalise_for_storage_task,
@@ -32,6 +34,7 @@ from musicstudio_dsp.worker import (
 TASK_NAMES = (
     "musicstudio_dsp.normalise_for_storage",
     "musicstudio_dsp.convert_for_download",
+    "musicstudio_dsp.apply_effect_chain",
 )
 
 
@@ -42,7 +45,7 @@ def wav_bytes(sample_rate: int = 44_100, frames: int = 44_100) -> bytes:
 
 
 class TestApplication:
-    def test_registers_both_tasks_under_stable_names(self) -> None:
+    def test_registers_every_task_under_a_stable_name(self) -> None:
         # Producers enqueue by name, so these strings are a published contract.
         for name in TASK_NAMES:
             assert name in celery_app.tasks
@@ -50,6 +53,7 @@ class TestApplication:
     def test_task_names_match_their_functions(self) -> None:
         assert normalise_for_storage_task.name == TASK_NAMES[0]
         assert convert_for_download_task.name == TASK_NAMES[1]
+        assert apply_effect_chain_task.name == TASK_NAMES[2]
 
     def test_accepts_json_only(self) -> None:
         # A broker that accepts pickle executes what it is sent, and this worker
@@ -113,3 +117,62 @@ class TestConvertForDownloadTask:
         payload = base64.b64encode(wav_bytes(frames=4_410)).decode("ascii")
 
         json.dumps(convert_for_download_task.run(payload, "flac"))
+
+
+
+@pytest.mark.skipif(
+    not pedalboard_available(),
+    reason="pedalboard is unavailable (native wheel needs libatomic.so.1 from the platform)",
+)
+class TestApplyEffectChainTask:
+    """The effects shell (Requirement 29.12). Behaviour lives in ``test_effects.py``."""
+
+    CHAIN = '[{"kind":"gain","parameters":{"gain_db":-6}}]'
+
+    def test_round_trips_the_base64_transport_encoding(self) -> None:
+        result = apply_effect_chain_task.run(
+            base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 4_800)).decode("ascii"),
+            self.CHAIN,
+        )
+
+        decoded = decode(base64.b64decode(result["audio_base64"]))
+        assert decoded.sample_rate == INTERNAL_SAMPLE_RATE
+        assert decoded.channel_count == 2
+
+    def test_accepts_the_chain_as_the_printed_json_document(self) -> None:
+        # The chain crosses as a *string*, so the queue's JSON serialiser cannot reshape
+        # its numbers before `validate_chain` sees them.
+        result = apply_effect_chain_task.run(
+            base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 4_800)).decode("ascii"),
+            self.CHAIN,
+        )
+        assert result["frame_count"] == 4_800
+        assert result["tail_truncated"] is False
+
+    def test_reports_the_three_shape_fields_requirement_29_29_names(self) -> None:
+        result = apply_effect_chain_task.run(
+            base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 4_800)).decode("ascii"),
+            self.CHAIN,
+        )
+        # A duration alone cannot distinguish 48000 frames at 48 kHz from 44100 at
+        # 44.1 kHz, and Requirement 29.29 requires both to match.
+        for field in ("sample_rate", "channels", "frame_count"):
+            assert field in result
+
+    def test_result_is_json_serialisable(self) -> None:
+        import json
+
+        result = apply_effect_chain_task.run(
+            base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 4_800)).decode("ascii"),
+            self.CHAIN,
+        )
+        assert json.loads(json.dumps(result))["audio_format"] == "flac"
+
+    def test_refuses_an_out_of_range_chain_rather_than_clamping(self) -> None:
+        from musicstudio_dsp.effects import EffectChainError
+
+        with pytest.raises(EffectChainError):
+            apply_effect_chain_task.run(
+                base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 4_800)).decode("ascii"),
+                '[{"kind":"gain","parameters":{"gain_db":99}}]',
+            )
