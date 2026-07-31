@@ -8,6 +8,7 @@ import {
 import { createRedisLoginAttemptStore } from '../../services/account/adapters/redis-login-attempt-store';
 import { createRedisSessionStore } from '../../services/account/adapters/redis-session-store';
 import type { OAuthProvider } from '../../services/account/oauth-provider';
+import { ReportService } from '../../services/moderation/report-service';
 
 import { ProviderRegistry } from '../../adapters/registry/provider-registry';
 import type { EngineAdapterFactoryPort } from '../../adapters/registry/ports';
@@ -21,6 +22,12 @@ import {
   createInMemoryAccountRepository,
   type InMemoryAccountRepository,
 } from './in-memory-account-repository';
+import {
+  createConfigurablePublicAssets,
+  createInMemoryContentReportStore,
+  type ConfigurablePublicAssets,
+  type InMemoryContentReportStore,
+} from './moderation-harness';
 import { createMutableClock, type MutableClock } from './mutable-clock';
 import { createRecordingEmailSender, type RecordingEmailSender } from './recording-email-sender';
 import {
@@ -42,6 +49,13 @@ export interface GatewayEngineHarness {
   readonly adapterFactory: EngineAdapterFactoryPort;
 }
 
+/** Present only when `moderation` was requested (task 6.1 report routes). */
+export interface GatewayModerationHarness {
+  readonly reports: ReportService;
+  readonly store: InMemoryContentReportStore;
+  readonly publicAssets: ConfigurablePublicAssets;
+}
+
 export interface GatewayHarness {
   readonly app: FastifyInstance;
   readonly accountService: AccountService;
@@ -50,6 +64,7 @@ export interface GatewayHarness {
   readonly repository: InMemoryAccountRepository;
   readonly emails: RecordingEmailSender;
   readonly engines: GatewayEngineHarness | null;
+  readonly moderation: GatewayModerationHarness | null;
   close(): Promise<void>;
 }
 
@@ -63,6 +78,11 @@ export interface GatewayHarnessOptions {
    * auth-only and the Requirement 1 tests stay independent of the engine layer.
    */
   readonly engines?: { readonly assignments?: Partial<Record<AssetKind, EngineAssignment>> };
+  /**
+   * Mounts the report-intake and review-state routes (Requirements 16.8, 16.9),
+   * sharing the harness clock so report timestamps are deterministic.
+   */
+  readonly moderation?: { readonly publishedAssetIds?: readonly string[] };
 }
 
 /**
@@ -94,6 +114,10 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
   });
 
   const engines = options.engines === undefined ? null : createEngineHarness(clock, options.engines);
+  const moderation =
+    options.moderation === undefined
+      ? null
+      : createGatewayModerationHarness(clock, options.moderation);
 
   const app = buildGatewayApp({
     accountService,
@@ -101,6 +125,7 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
     ...(engines === null
       ? {}
       : { engines: { registry: engines.registry, adapterFactory: engines.adapterFactory } }),
+    ...(moderation === null ? {} : { moderation: { reports: moderation.reports } }),
   });
 
   return {
@@ -111,7 +136,36 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
     repository,
     emails,
     engines,
+    moderation,
     close: () => app.close(),
+  };
+}
+
+/** Returns the moderation harness, or throws if the gateway was built without one. */
+export function requireModeration(harness: GatewayHarness): GatewayModerationHarness {
+  if (harness.moderation === null) {
+    throw new Error('this gateway harness was built without moderation routes');
+  }
+  return harness.moderation;
+}
+
+function createGatewayModerationHarness(
+  clock: MutableClock,
+  options: { readonly publishedAssetIds?: readonly string[] },
+): GatewayModerationHarness {
+  const store = createInMemoryContentReportStore();
+  const publicAssets = createConfigurablePublicAssets(options.publishedAssetIds ?? []);
+  let sequence = 0;
+
+  return {
+    store,
+    publicAssets,
+    reports: new ReportService({
+      store,
+      publicAssets,
+      clock,
+      newReportId: () => `report-${String(++sequence)}`,
+    }),
   };
 }
 

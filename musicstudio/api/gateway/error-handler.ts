@@ -2,14 +2,16 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 
 import { isRegistryError } from '../../adapters/registry/errors';
 import { isAccountError } from '../../services/account/errors';
+import { isModerationError } from '../../services/moderation/errors';
 
 /**
  * Single error contract for the gateway.
  *
  * Every failure body is `{ "error": { "code", "message", ... } }`. The `code`
  * is the machine-readable reason several criteria ask for (1.2 duplicate, 1.8
- * token expiry, 20.5/20.6/20.11/20.13/20.22/20.23 registry rejections), so
- * clients branch on `code`, never on status alone.
+ * token expiry, 20.5/20.6/20.11/20.13/20.22/20.23 registry rejections,
+ * 16.2/16.4/16.11/16.12/16.14 moderation refusals), so clients branch on `code`,
+ * never on status alone.
  */
 export interface ErrorBody {
   readonly error: {
@@ -42,7 +44,7 @@ interface CodedDomainError {
 
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler((error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
-    if (isAccountError(error) || isRegistryError(error)) {
+    if (isAccountError(error) || isRegistryError(error) || isModerationError(error)) {
       sendDomainError(reply, error);
       return;
     }

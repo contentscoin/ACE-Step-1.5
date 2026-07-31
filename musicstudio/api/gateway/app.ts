@@ -4,12 +4,14 @@ import type { EngineAdapterFactoryPort } from '../../adapters/registry/ports';
 import type { ProviderRegistry } from '../../adapters/registry/provider-registry';
 import type { AccountService } from '../../services/account/account-service';
 import { systemClock, type Clock } from '../../services/clock';
+import type { ReportService } from '../../services/moderation/report-service';
 
 import { createAuthenticationHook, registerAuthenticationDecorator } from './authentication';
 import { registerErrorHandler } from './error-handler';
 import { registerAccountRoutes } from './routes/account-routes';
 import { registerAuthRoutes } from './routes/auth-routes';
 import { registerEngineRoutes } from './routes/engine-routes';
+import { registerModerationRoutes } from './routes/moderation-routes';
 
 export const API_PREFIX = '/v1';
 
@@ -23,10 +25,20 @@ export interface GatewayEngineDependencies {
   readonly adapterFactory: EngineAdapterFactoryPort;
 }
 
+/**
+ * Moderation wiring is optional for the same reason engine wiring is: a gateway
+ * without report intake is a valid composition, and the Requirement 1 and 20 tests
+ * stay independent of Requirement 16.
+ */
+export interface GatewayModerationDependencies {
+  readonly reports: ReportService;
+}
+
 export interface GatewayDependencies {
   readonly accountService: AccountService;
   readonly clock?: Clock;
   readonly engines?: GatewayEngineDependencies;
+  readonly moderation?: GatewayModerationDependencies;
   readonly fastifyOptions?: FastifyServerOptions;
 }
 
@@ -64,6 +76,9 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
           adapterFactory: deps.engines.adapterFactory,
           authenticate,
         });
+      }
+      if (deps.moderation !== undefined) {
+        registerModerationRoutes(scope, { reports: deps.moderation.reports, authenticate });
       }
     },
     { prefix: API_PREFIX },
