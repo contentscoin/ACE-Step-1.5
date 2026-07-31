@@ -1,0 +1,39 @@
+[project]
+# DSP worker dependencies are declared here, independently of the repository
+# root pyproject.toml (design §1.4.2, §12.1). The engine's PyTorch/CUDA
+# resolution and the product layer's DSP resolution must never constrain
+# each other, so the two Python environments are resolved separately.
+name = "musicstudio-dsp"
+version = "0.0.0"
+description = "MusicStudio DSP worker — resampling, effects, loudness, onset, mixdown chain (design §5)"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "soundfile>=0.13.1",
+]
+
+[project.optional-dependencies]
+# Audio processing stack (design §5, §12). Kept as an extra so that lint,
+# type checks and the property harness can run without the heavy wheels.
+audio = [
+    "librosa>=0.10.2",
+    "pedalboard>=0.9.12",
+    "pyloudnorm>=0.1.1",
+]
+dev = [
+    "hypothesis>=6.100",
+    "pytest>=8.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/musicstudio_dsp"]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+pythonpath = ["src"]
+addopts = "-q"

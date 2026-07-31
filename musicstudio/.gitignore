@@ -1,0 +1,18 @@
+# Product-layer build/tooling artefacts (design §1.4.2: independent toolchain)
+node_modules/
+
+# The repository root ignores package-lock.json for the VitePress docs toolchain.
+# The product layer needs a committed lockfile for reproducible CI installs, so
+# the parent rule is reversed here only for this tree.
+!package-lock.json
+build/
+coverage/
+*.tsbuildinfo
+
+# DSP worker
+dsp/.venv/
+dsp/**/__pycache__/
+dsp/.pytest_cache/
+dsp/.hypothesis/
+dsp/*.egg-info/
+dsp/src/*.egg-info/

@@ -1,0 +1,101 @@
+name: MusicStudio CI
+
+# Product-layer CI (design §12.1): shares GitHub Actions with the host
+# repository but is separated by path filters so it never runs for engine
+# changes and the engine workflows never run for product-layer changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'musicstudio/**'
+      - '.github/workflows/musicstudio-ci.yml'
+  pull_request:
+    paths:
+      - 'musicstudio/**'
+      - '.github/workflows/musicstudio-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: musicstudio-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Required check for design §14 risk #9: musicstudio/ must not import acestep/.
+  import-boundary:
+    name: Import boundary (musicstudio -> acestep)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: musicstudio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: musicstudio/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Node dependencies
+        run: npm ci || npm install
+
+      - name: TypeScript boundary rules (ESLint)
+        run: npm run lint
+
+      - name: Python boundary check
+        run: python dsp/scripts/check_import_boundary.py
+
+  typescript:
+    name: TypeScript (typecheck + fast-check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: musicstudio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: musicstudio/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci || npm install
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test (vitest + fast-check)
+        run: npm test
+
+  dsp:
+    name: DSP worker (pytest + hypothesis)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: musicstudio/dsp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: musicstudio/dsp/pyproject.toml
+
+      - name: Install DSP dependencies
+        run: python -m pip install --upgrade pip && pip install -e '.[dev]'
+
+      - name: Test (pytest + hypothesis)
+        run: pytest

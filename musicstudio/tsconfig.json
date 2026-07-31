@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "rootDir": ".",
+    "outDir": "build",
+    "types": ["node"],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": false,
+    "declaration": true,
+    "sourceMap": true,
+    "paths": {
+      "@domain/*": ["./domain/*"],
+      "@db/*": ["./db/*"],
+      "@services/*": ["./services/*"],
+      "@adapters/*": ["./adapters/*"],
+      "@api/*": ["./api/*"]
+    }
+  },
+  "include": [
+    "api/**/*.ts",
+    "services/**/*.ts",
+    "adapters/**/*.ts",
+    "domain/**/*.ts",
+    "db/**/*.ts",
+    "test/**/*.ts"
+  ],
+  "exclude": ["node_modules", "build", "web", "dsp"]
+}
