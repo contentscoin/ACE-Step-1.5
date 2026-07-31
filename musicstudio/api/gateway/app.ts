@@ -5,6 +5,7 @@ import type { ProviderRegistry } from '../../adapters/registry/provider-registry
 import type { AccountService } from '../../services/account/account-service';
 import { systemClock, type Clock } from '../../services/clock';
 import type { CreditService } from '../../services/credit';
+import type { EditGateway } from '../../services/generation/edit-gateway';
 import type { JobEventBusPort } from '../../services/generation/job-events';
 import type { JobOrchestrator } from '../../services/generation/job-orchestrator';
 import type { JobRuntime } from '../../services/generation/runtime';
@@ -16,6 +17,7 @@ import { registerErrorHandler } from './error-handler';
 import { registerAccountRoutes } from './routes/account-routes';
 import { registerAuthRoutes } from './routes/auth-routes';
 import { registerCreditRoutes } from './routes/credit-routes';
+import { registerEditRoutes } from './routes/edit-routes';
 import { registerEngineRoutes } from './routes/engine-routes';
 import { registerGenerationRoutes } from './routes/generation-routes';
 import { registerModerationRoutes } from './routes/moderation-routes';
@@ -62,6 +64,14 @@ export interface GatewayGenerationDependencies {
    * tests stay unaffected by Requirements 3 and 4.
    */
   readonly songGateway?: SongGateway;
+  /**
+   * Mounts the five Edit_Task endpoints (Requirement 7) when supplied.
+   *
+   * Independent of `songGateway` for the same reason that one is independent of the
+   * generic routes: a composition may expose generation without editing, and an edit
+   * needs a Library_Service port that plain generation does not.
+   */
+  readonly editGateway?: EditGateway;
 }
 
 export interface GatewayDependencies {
@@ -127,6 +137,9 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
         });
         if (deps.generation.songGateway !== undefined) {
           registerSongRoutes(scope, { gateway: deps.generation.songGateway, authenticate });
+        }
+        if (deps.generation.editGateway !== undefined) {
+          registerEditRoutes(scope, { gateway: deps.generation.editGateway, authenticate });
         }
       }
     },

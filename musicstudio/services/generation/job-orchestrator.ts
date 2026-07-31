@@ -26,6 +26,7 @@
 import type { InputModality } from '../../adapters/normalized-generation';
 import { routeGenerationRequest } from '../../adapters/registry/routing';
 import type { AssetKind } from '../../domain/asset-kind';
+import type { EditParameters } from '../../domain/edit/request';
 import type { SongParameters } from '../../domain/song/request';
 import type { JobFailure } from '../../domain/generation-job/failure';
 import { isRetryableFailureClass } from '../../domain/generation-job/failure';
@@ -68,6 +69,15 @@ export interface SubmitJobInput {
    * Requirement 6.4 retry reproduces the same musical request.
    */
   readonly song?: SongParameters;
+  /**
+   * Validated Edit_Task parameters (Requirement 7).
+   *
+   * Carried through untouched, exactly like `song`: the orchestrator neither reads
+   * nor defaults any of it. It becomes part of the stored `input`, so a Requirement
+   * 6.4 retry reproduces the same edit against the same source audio, and the
+   * Requirement 7.12 lineage recorded on completion names the same parent.
+   */
+  readonly edit?: EditParameters;
   /**
    * Content policy verdict, evaluated lazily.
    *
@@ -328,5 +338,6 @@ function normaliseInput(input: SubmitJobInput): GenerationJobRecord['input'] {
     ...(input.seed === undefined ? {} : { seed: input.seed }),
     ...(input.engineId === undefined ? {} : { engineId: input.engineId }),
     ...(input.song === undefined ? {} : { song: input.song }),
+    ...(input.edit === undefined ? {} : { edit: input.edit }),
   };
 }

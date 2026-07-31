@@ -156,6 +156,9 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
             ...(generation.songGateway === null
               ? {}
               : { songGateway: generation.songGateway }),
+            ...(generation.editGateway === null
+              ? {}
+              : { editGateway: generation.editGateway }),
           },
         }),
   });

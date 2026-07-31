@@ -11,6 +11,10 @@
  * Declared as seams only: the credit debit (`CreditChargePort`, task 1.4), the
  * Audio_Asset creation of Requirement 5.6 (`AssetPublicationPort`, task 5.1) and
  * the engine's reported average duration (`EngineStatisticsPort`).
+ *
+ * Also implemented here: Requirement 7's Edit_Task gateway and its Requirement 7.12
+ * lineage, whose source-audio resolution and lineage persistence are declared as two
+ * further Library_Service seams (`EditSourceAudioPort`, `EditLineagePort`).
  */
 
 export { jobFailedDraft, type JobFailureAuditInput } from './audit';
@@ -21,6 +25,35 @@ export {
   type BullJobOptions,
   type BullQueueHandle,
 } from './bullmq-queue';
+export {
+  EditGateway,
+  type EditGatewayOptions,
+  type EditModerationContext,
+  type EditSubmissionInput,
+  type EditSubmissionResult,
+} from './edit-gateway';
+export {
+  editLineageRejected,
+  editRequestInvalid,
+  editSourceAssetNotFound,
+  editTaskUnsupported,
+} from './edit-errors';
+export {
+  createInMemoryEditLineage,
+  editLineageEdges,
+  recordEditLineage,
+  withEditLineage,
+  type EditLineageInput,
+  type EditLineageRecording,
+  type InMemoryEditLineage,
+  type RecordEditLineageInput,
+} from './edit-lineage';
+export type {
+  EditLineagePort,
+  EditSourceAudioPort,
+  EditSourceAudioQuery,
+  EditSourceAudioRecord,
+} from './edit-ports';
 export {
   USER_VISIBLE_STATE_FOR_ENGINE_STATE,
   lifecycleEventFor,

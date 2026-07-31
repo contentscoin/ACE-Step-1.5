@@ -20,7 +20,14 @@ export type GenerationErrorCode =
   | 'generation_job_not_retryable'
   | 'generation_job_forbidden'
   /** Requirements 3.5, 3.8, 4.6 — see `song-errors.ts` for the payload. */
-  | 'song_request_invalid';
+  | 'song_request_invalid'
+  /** Requirements 7.2, 7.4, 7.6, 7.7, 7.10, 7.11 — see `edit-errors.ts`. */
+  | 'edit_request_invalid'
+  /** Requirement 7.9, carrying the models that do support the Edit_Task. */
+  | 'edit_task_unsupported'
+  | 'edit_source_asset_not_found'
+  /** Requirement 7.12 lineage refused by the design §4.2 invariants. */
+  | 'edit_lineage_rejected';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

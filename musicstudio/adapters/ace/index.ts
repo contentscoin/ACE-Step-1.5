@@ -2,6 +2,7 @@ export * from './ace-engine-adapter';
 export * from './envelope';
 export * from './errors';
 export * from './generation-request';
+export * from './model-tasks';
 export * from './query-result';
 export * from './raw-result';
 export * from './submit-ack';

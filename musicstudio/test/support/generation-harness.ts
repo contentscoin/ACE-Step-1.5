@@ -11,6 +11,12 @@ import type { RefundRequest } from '../../adapters/registry/ports';
 import { ProviderRegistry } from '../../adapters/registry/provider-registry';
 import type { AssetKind } from '../../domain/asset-kind';
 import type { AuditLogDraft } from '../../domain/audit-log/entry';
+import { EditGateway } from '../../services/generation/edit-gateway';
+import {
+  createInMemoryEditLineage,
+  withEditLineage,
+  type InMemoryEditLineage,
+} from '../../services/generation/edit-lineage';
 import { JobOrchestrator } from '../../services/generation/job-orchestrator';
 import {
   createInMemoryJobEventBus,
@@ -28,6 +34,11 @@ import type {
 import type { JobRuntime } from '../../services/generation/runtime';
 import { SongGateway } from '../../services/generation/song-gateway';
 
+import {
+  createSourceAudioPort,
+  TEST_EDIT_MODEL_CATALOGUE,
+  type ConfigurableSourceAudioPort,
+} from './edit-harness';
 import {
   createManualScheduler,
   createRecordingAuditSink,
@@ -228,6 +239,12 @@ export interface GenerationHarness {
   readonly registeredAdapter: EngineAdapter;
   /** Requirements 3, 4 — present only when the song gateway was requested. */
   readonly songGateway: SongGateway | null;
+  /** Requirement 7 — present only when the edit gateway was requested. */
+  readonly editGateway: EditGateway | null;
+  /** The Library_Service seam the edit gateway resolves source audio through. */
+  readonly sourceAudio: ConfigurableSourceAudioPort;
+  /** Requirement 7.12: every lineage edge the publication path recorded. */
+  readonly lineage: InMemoryEditLineage;
   readonly store: JobStorePort;
   readonly queue: JobQueuePort;
   readonly events: JobEventBusPort;
@@ -263,6 +280,11 @@ export interface GenerationHarnessOptions {
   readonly adapter?: EngineAdapter;
   /** Builds the Requirement 3/4 song gateway over this harness's orchestrator. */
   readonly withSongGateway?: boolean;
+  /**
+   * Builds the Requirement 7 edit gateway, and wraps asset publication so an
+   * Edit_Task's results get their Requirement 7.12 lineage.
+   */
+  readonly withEditGateway?: boolean;
 }
 
 export function createGenerationHarness(
@@ -277,6 +299,7 @@ export function createGenerationHarness(
   const refunds = createCollectingRefundPort();
   const charges = createRecordingChargePort();
   const assets = createRecordingAssetPublication();
+  const lineage = createInMemoryEditLineage();
   const store = createInMemoryJobStore();
   const queue = createInMemoryJobQueue();
   const events = createInMemoryJobEventBus();
@@ -284,13 +307,20 @@ export function createGenerationHarness(
   const registeredAdapter = options.adapter ?? adapter;
 
   const registry = new ProviderRegistry({ clock, auditSink: audit });
+  // Design §3.6 assigns `task_type=extract` to the `stem` Asset_Kind, so a harness with
+  // the edit gateway must route `stem` as well or every extract test would fail on
+  // routing rather than on the behaviour it is about.
+  const routedKinds: readonly AssetKind[] =
+    options.withEditGateway === true && assetKind !== 'stem' ? [assetKind, 'stem'] : [assetKind];
   if (options.withoutEngine !== true) {
     const descriptor = engineDescriptor(TEST_ENGINE_ID, {
-      supportedAssetKinds: [assetKind],
+      supportedAssetKinds: routedKinds,
       maxOutputDurationMs: 600_000,
     });
     registry.register({ descriptor, adapter: registeredAdapter, actorId: 'operator-1' });
-    registry.setDefaultEngine(assetKind, TEST_ENGINE_ID, 'operator-1');
+    for (const kind of routedKinds) {
+      registry.setDefaultEngine(kind, TEST_ENGINE_ID, 'operator-1');
+    }
     // Two consecutive successes are what Requirement 20.21 needs to mark an engine
     // available; without them routing would report `no_available_engine`.
     for (let probe = 0; probe < 2; probe += 1) {
@@ -314,7 +344,10 @@ export function createGenerationHarness(
     refunds,
     charges,
     audit,
-    assets,
+    // Requirement 7.12 is recorded by decorating publication rather than by the
+    // Library_Service stand-in, which is exactly how the production composition wires
+    // it — so what the tests exercise is the real lineage path.
+    assets: options.withEditGateway === true ? withEditLineage(assets, lineage) : assets,
     statistics,
     clock,
     scheduler,
@@ -329,6 +362,7 @@ export function createGenerationHarness(
   events.subscribe(options.accountId ?? 'user-1', (event) => received.push(event));
 
   const orchestrator = new JobOrchestrator(runtime);
+  const sourceAudio = createSourceAudioPort();
 
   return {
     orchestrator,
@@ -338,6 +372,12 @@ export function createGenerationHarness(
     registeredAdapter,
     songGateway:
       options.withSongGateway === true ? new SongGateway({ orchestrator, assetKind }) : null,
+    editGateway:
+      options.withEditGateway === true
+        ? new EditGateway({ orchestrator, sourceAudio, catalogue: TEST_EDIT_MODEL_CATALOGUE })
+        : null,
+    sourceAudio,
+    lineage,
     store,
     queue,
     events,

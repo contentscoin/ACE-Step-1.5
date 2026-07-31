@@ -15,10 +15,21 @@
  */
 
 import type { NormalizedGenerationRequest } from '../normalized-generation';
+import type { EditParameters } from '../../domain/edit/request';
 import type { SongParameters } from '../../domain/song/request';
 
 export function songParametersOf(request: NormalizedGenerationRequest): SongParameters {
-  return request.song ?? fallbackParameters(request);
+  // Requirement 7.1's "new style" is the musical side of an edit, and it is already
+  // a validated `SongParameters`, so an edit request needs no fallback: the style is
+  // read straight off it.
+  return request.edit?.style ?? request.song ?? fallbackParameters(request);
+}
+
+/** The Edit_Task parameters, or `undefined` for a plain generation (Requirement 7). */
+export function editParametersOf(
+  request: NormalizedGenerationRequest,
+): EditParameters | undefined {
+  return request.edit;
 }
 
 function fallbackParameters(request: NormalizedGenerationRequest): SongParameters {

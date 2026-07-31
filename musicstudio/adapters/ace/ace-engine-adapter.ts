@@ -25,7 +25,7 @@ import type { Clock } from '../../services/clock';
 
 import { asRecord, unwrapEnvelope } from './envelope';
 import { aceMalformedResponse, aceTaskUnknown } from './errors';
-import { songParametersOf } from './generation-request';
+import { editParametersOf, songParametersOf } from './generation-request';
 import { decodeTaskResult, type AceTaskResult } from './query-result';
 import { buildAceSubmitPayload } from './submit-payload';
 import { decodeSubmitAck } from './submit-ack';
@@ -65,12 +65,22 @@ export class AceEngineAdapter implements EngineAdapter {
     this.taskTypeFor = options.taskTypeFor;
   }
 
-  /** Requirements 3.1–3.3, 3.6, 3.7, 4.1–4.5, 4.7–4.10 all land on this wire body. */
+  /**
+   * Requirements 3.1–3.3, 3.6, 3.7, 4.1–4.5, 4.7–4.10 and 7.1–7.3, 7.6–7.8 all land
+   * on this wire body.
+   *
+   * The task type comes from the request's Edit_Task when it carries one, so an edit
+   * needs no configuration to be submitted as `cover` / `repaint` / `extract` /
+   * `lego` / `complete`. The `taskTypeFor` option still wins when supplied, which is
+   * what keeps the unnamed `cover-nofsq` variant reachable.
+   */
   async submit(request: NormalizedGenerationRequest): Promise<EngineJobHandle> {
     const taskType = this.taskTypeFor?.(request);
+    const edit = editParametersOf(request);
     const payload = buildAceSubmitPayload({
       song: songParametersOf(request),
       ...(taskType === undefined ? {} : { taskType }),
+      ...(edit === undefined ? {} : { edit }),
     });
 
     const response = await this.transport.postJson({

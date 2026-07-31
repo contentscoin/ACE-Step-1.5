@@ -20,6 +20,7 @@
 
 import type { NormalizedGenerationResult } from '../../adapters/normalized-generation';
 import type { AssetKind } from '../../domain/asset-kind';
+import type { DerivationType } from '../../domain/derivation-type';
 
 export interface ChargeRequest {
   readonly accountId: string;
@@ -58,6 +59,17 @@ export interface AssetPublicationRequest {
   readonly engineId: string;
   /** Requirement 5.6: one Audio_Asset is created per entry. */
   readonly results: readonly NormalizedGenerationResult[];
+  /**
+   * Input assets these results derive from, and how (Requirement 7.12).
+   *
+   * Present only when the job *was* a derivation: an Edit_Task names its source
+   * asset and its edit kind here, and a plain text-to-music job carries neither. The
+   * lineage itself is recorded by `withEditLineage` in `edit-lineage.ts` rather than
+   * by whoever implements this port, so a Library_Service that ignores these two
+   * fields still gets correct lineage.
+   */
+  readonly sourceAssetIds?: readonly string[];
+  readonly derivationType?: DerivationType;
 }
 
 export interface AssetPublicationPort {

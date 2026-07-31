@@ -7,6 +7,7 @@
  */
 
 import type { AssetKind } from '../domain/asset-kind';
+import type { EditParameters } from '../domain/edit/request';
 import { CANONICAL_SAMPLE_RATE } from '../domain/provenance';
 import type { SongParameters } from '../domain/song/request';
 
@@ -55,6 +56,18 @@ export interface NormalizedGenerationRequest {
    * engine understands without help.
    */
   readonly song?: SongParameters;
+  /**
+   * Validated Edit_Task parameters (Requirement 7), present for cover, repaint,
+   * extract, lego and complete requests.
+   *
+   * Editing vocabulary, not engine vocabulary — a source audio, a strength, an
+   * interval, a track name — for the same reason `song` is: the translation to
+   * `src_audio_path` / `audio_cover_strength` / `repainting_start` / `track_name`
+   * belongs to the engine's adapter. It carries the validated source descriptor, so
+   * `inputAssetIds` remains the routing-level statement of which assets are inputs
+   * and this is the statement of what the edit does with them.
+   */
+  readonly edit?: EditParameters;
 }
 
 export interface NormalizedGenerationResult {

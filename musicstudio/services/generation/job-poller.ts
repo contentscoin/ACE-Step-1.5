@@ -21,6 +21,7 @@ import { ENGINE_JOB_STATE, type EngineJobHandle } from '../../adapters/engine-jo
 import { normalizeEngineResult } from '../../adapters/normalized-generation';
 import type { ScheduledTask } from '../../adapters/registry/health-schedule';
 import { callRemoteEngine, type RemoteCallContext } from '../../adapters/registry/remote-call';
+import { derivationTypeForEditKind } from '../../domain/edit/edit-kind';
 import { classifyEngineFailure, jobFailure } from '../../domain/generation-job/failure';
 import { isTerminalGenerationJobState } from '../../domain/generation-job/lifecycle';
 import { nextPollDelayMs } from '../../domain/generation-job/poll-schedule';
@@ -138,12 +139,22 @@ async function completeJob(
     }),
   );
 
+  const edit = record.input.edit;
   const assetIds = await runtime.assets.publish({
     accountId: record.accountId,
     jobId: record.jobId,
     assetKind: record.input.assetKind,
     engineId: record.engineId,
     results,
+    // Requirement 7.12: an Edit_Task's results derive from its source asset, and the
+    // edit kind is the derivation. Both are read off the stored request rather than
+    // recomputed, so a Requirement 6.4 retry records the same lineage.
+    ...(edit === undefined
+      ? {}
+      : {
+          sourceAssetIds: [edit.source.assetId],
+          derivationType: derivationTypeForEditKind(edit.kind),
+        }),
   });
 
   return applyJobEvent(runtime, record, { kind: 'engine_succeeded' }, { assetIds, progressPercent: 100 });
