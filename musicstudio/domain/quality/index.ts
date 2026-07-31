@@ -1,4 +1,5 @@
 export * from './loop-seam-thresholds';
+export * from './mastering-thresholds';
 export * from './one-shot-tail-thresholds';
 export * from './speech-thresholds';
 export * from './threshold-name';

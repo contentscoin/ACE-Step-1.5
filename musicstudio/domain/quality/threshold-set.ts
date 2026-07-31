@@ -210,6 +210,70 @@ export const INITIAL_QUALITY_THRESHOLD_SET: QualityThresholdSet = {
       adjustableFrom: 20,
       adjustableTo: 2_000,
     },
+      // Requirements 30.6, 30.8. Floored at 0.1 LUFS rather than 0: the measurement is
+    // reported to 0.1 (30.24), so a tighter band would demand agreement finer than the
+    // number it is compared against. The ceiling of 2.0 LUFS is the point past which
+    // "normalised to the target" stops being a defensible claim.
+    loudness_normalization_target_tolerance_lufs: {
+      name: 'loudness_normalization_target_tolerance_lufs',
+      value: 0.5,
+      unit: 'lufs',
+      adjustableFrom: 0.1,
+      adjustableTo: 2.0,
+    },
+    // Requirement 30.8. Floored at 0.01 dB: below that the bound is finer than the
+    // float32 sample representation can carry through a gain multiply, so the property
+    // would fail on arithmetic rather than on behaviour.
+    loudness_normalization_idempotence_gain_db: {
+      name: 'loudness_normalization_idempotence_gain_db',
+      value: 0.1,
+      unit: 'db',
+      adjustableFrom: 0.01,
+      adjustableTo: 1.0,
+    },
+    // Requirement 30.9. The floor of 3.0 dB is roughly the smallest attenuation that is
+    // audible as one; the ceiling of 60.0 dB is effectively silence, which is as far as
+    // "정리" can go.
+    dialogue_cleanup_non_speech_attenuation_min_db: {
+      name: 'dialogue_cleanup_non_speech_attenuation_min_db',
+      value: 10.0,
+      unit: 'db',
+      adjustableFrom: 3.0,
+      adjustableTo: 60.0,
+    },
+    dialogue_cleanup_speech_loudness_tolerance_lufs: {
+      name: 'dialogue_cleanup_speech_loudness_tolerance_lufs',
+      value: 1.0,
+      unit: 'lufs',
+      adjustableFrom: 0.1,
+      adjustableTo: 3.0,
+    },
+    // Requirement 30.10. Floored at 1 ms: the requirement is a length-preservation
+    // invariant, and at 48 kHz one millisecond is 48 frames — enough for a windowed
+    // envelope to round, and not enough to be audible as a timing change.
+    dialogue_cleanup_length_tolerance_ms: {
+      name: 'dialogue_cleanup_length_tolerance_ms',
+      value: 10,
+      unit: 'ms',
+      adjustableFrom: 1,
+      adjustableTo: 100,
+    },
+    // Requirement 30.12.
+    ducking_depth_accuracy_db: {
+      name: 'ducking_depth_accuracy_db',
+      value: 1.0,
+      unit: 'db',
+      adjustableFrom: 0.1,
+      adjustableTo: 3.0,
+    },
+    // Requirement 30.16.
+    ducking_non_speech_hold_db: {
+      name: 'ducking_non_speech_hold_db',
+      value: 0.5,
+      unit: 'db',
+      adjustableFrom: 0.1,
+      adjustableTo: 2.0,
+    },
     // Requirement 26.25. Floored at 10 ms rather than 0: a conversion is resynthesis,
     // not a sample-for-sample transform, and a tolerance of zero would reject every
     // real output. The ceiling of 1000 ms is the point past which "the same utterance"

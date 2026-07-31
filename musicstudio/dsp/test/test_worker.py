@@ -27,14 +27,23 @@ from musicstudio_dsp.effects import pedalboard_available
 from musicstudio_dsp.worker import (
     apply_effect_chain_task,
     celery_app,
+    clean_dialogue_task,
     convert_for_download_task,
+    duck_task,
+    measure_loudness_task,
     normalise_for_storage_task,
+    normalise_loudness_task,
 )
 
 TASK_NAMES = (
     "musicstudio_dsp.normalise_for_storage",
     "musicstudio_dsp.convert_for_download",
     "musicstudio_dsp.apply_effect_chain",
+    # Task 3.3's mastering shells (Requirements 30.6–30.17, 30.22, 30.24).
+    "musicstudio_dsp.measure_loudness",
+    "musicstudio_dsp.normalise_loudness",
+    "musicstudio_dsp.clean_dialogue",
+    "musicstudio_dsp.duck",
 )
 
 
@@ -54,6 +63,18 @@ class TestApplication:
         assert normalise_for_storage_task.name == TASK_NAMES[0]
         assert convert_for_download_task.name == TASK_NAMES[1]
         assert apply_effect_chain_task.name == TASK_NAMES[2]
+        assert measure_loudness_task.name == TASK_NAMES[3]
+        assert normalise_loudness_task.name == TASK_NAMES[4]
+        assert clean_dialogue_task.name == TASK_NAMES[5]
+        assert duck_task.name == TASK_NAMES[6]
+
+    def test_registers_no_task_this_tuple_does_not_name(self) -> None:
+        # The tuple is exhaustive on purpose: a task added without extending it would be a
+        # published name nothing pins, and producers enqueue by name.
+        registered = {
+            name for name in celery_app.tasks if name.startswith("musicstudio_dsp.")
+        }
+        assert registered == set(TASK_NAMES)
 
     def test_accepts_json_only(self) -> None:
         # A broker that accepts pickle executes what it is sent, and this worker
@@ -176,3 +197,148 @@ class TestApplyEffectChainTask:
                 base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 4_800)).decode("ascii"),
                 '[{"kind":"gain","parameters":{"gain_db":99}}]',
             )
+
+
+
+def speech_wav_bytes(sample_rate: int = INTERNAL_SAMPLE_RATE) -> bytes:
+    """Two seconds with one clearly speech-like burst and a quiet floor between."""
+    frames = sample_rate * 2
+    t = np.arange(frames, dtype=np.float64) / float(sample_rate)
+    signal = (0.0018 * np.sin(2.0 * np.pi * 37.0 * t)).astype(np.float32)
+    burst = (t >= 0.5) & (t < 1.3)
+    signal[burst] += (0.3 * np.sin(2.0 * np.pi * 300.0 * t[burst])).astype(np.float32)
+    return encode(AudioBuffer.from_channels(sample_rate, [signal]), "wav")
+
+
+class TestMeasureLoudnessTask:
+    """Requirements 30.22, 30.24. Behaviour lives in ``test_loudness.py``."""
+
+    def test_returns_both_the_unrounded_and_the_reported_forms(self) -> None:
+        result = measure_loudness_task.run(
+            base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 48_000)).decode("ascii")
+        )
+
+        assert set(result) == {"measurement", "reported"}
+        # 30.24's reporting step, on the reported form only.
+        reported = result["reported"]["integrated_loudness_lufs"]
+        assert abs(reported * 10 - round(reported * 10)) < 1e-9
+        assert len(result["measurement"]["octave_band_energies_db"]) == 10
+
+    def test_result_is_json_serialisable(self) -> None:
+        import json
+
+        payload = base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 48_000)).decode("ascii")
+
+        json.dumps(measure_loudness_task.run(payload))
+
+    def test_encodes_an_unmeasurable_level_as_null_not_as_a_large_negative(self) -> None:
+        import json
+
+        silence = encode(
+            AudioBuffer.from_channels(INTERNAL_SAMPLE_RATE, [np.zeros(48_000, dtype=np.float32)]),
+            "wav",
+        )
+
+        result = measure_loudness_task.run(base64.b64encode(silence).decode("ascii"))
+
+        json.dumps(result)
+        assert result["measurement"]["integrated_loudness_lufs"] is None
+
+
+class TestNormaliseLoudnessTask:
+    """Requirements 30.6, 30.7, 30.8, 30.25. Behaviour lives in ``test_mastering.py``."""
+
+    def test_round_trips_the_base64_transport_encoding(self) -> None:
+        result = normalise_loudness_task.run(
+            base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 48_000)).decode("ascii"), -14.0
+        )
+
+        decoded = decode(base64.b64decode(result["audio_base64"]))
+        assert decoded.sample_rate == INTERNAL_SAMPLE_RATE
+        assert decoded.channel_count == 2
+
+    def test_reports_the_fields_requirements_30_7_and_30_25_need(self) -> None:
+        result = normalise_loudness_task.run(
+            base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 48_000)).decode("ascii"), -14.0
+        )
+
+        for field in (
+            "applied_gain_db",
+            "requested_gain_db",
+            "true_peak_limited",
+            "target_missed",
+            "measurable",
+            "shortfall_lufs",
+        ):
+            assert field in result
+        assert result["measurable"] is True
+
+    def test_defaults_the_target_to_the_registry_value(self) -> None:
+        # Requirement 30.5's -14.0 LUFS default, resolved by the worker when the product
+        # layer sends nothing.
+        result = normalise_loudness_task.run(
+            base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 48_000)).decode("ascii")
+        )
+
+        assert result["target_lufs"] == -14.0
+
+    def test_result_is_json_serialisable(self) -> None:
+        import json
+
+        json.dumps(
+            normalise_loudness_task.run(
+                base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 48_000)).decode("ascii"), -16.0
+            )
+        )
+
+
+class TestCleanDialogueTask:
+    """Requirements 30.9, 30.10. Behaviour lives in ``test_mastering.py``."""
+
+    def test_reports_the_regions_and_both_measurements(self) -> None:
+        result = clean_dialogue_task.run(
+            base64.b64encode(speech_wav_bytes()).decode("ascii")
+        )
+
+        assert result["has_non_speech"] is True
+        assert len(result["speech_regions"]) >= 1
+        assert set(result["speech_regions"][0]) == {"startMs", "endMs"}
+
+    def test_preserves_length_exactly(self) -> None:
+        # Requirement 30.10 allows 10 ms; the envelope approach gives 0.
+        result = clean_dialogue_task.run(
+            base64.b64encode(speech_wav_bytes()).decode("ascii")
+        )
+
+        assert result["input_duration_ms"] == result["output_duration_ms"]
+
+    def test_result_is_json_serialisable(self) -> None:
+        import json
+
+        json.dumps(clean_dialogue_task.run(base64.b64encode(speech_wav_bytes()).decode("ascii")))
+
+
+class TestDuckTask:
+    """Requirements 30.12–30.17. Behaviour lives in ``test_mastering.py``."""
+
+    def test_returns_the_music_track_and_the_automation_curve(self) -> None:
+        dialogue = base64.b64encode(speech_wav_bytes()).decode("ascii")
+        music = base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 96_000)).decode("ascii")
+
+        result = duck_task.run(dialogue, music, -12.0, 50.0, 300.0)
+
+        decoded = decode(base64.b64decode(result["audio_base64"]))
+        # The music track's shape, not the dialogue track's: 30.12 attenuates the music.
+        assert decoded.channel_count == 2
+        assert result["automation_points"]
+        assert set(result["automation_points"][0]) == {"timeMs", "gainDb"}
+
+    def test_result_is_json_serialisable(self) -> None:
+        import json
+
+        json.dumps(
+            duck_task.run(
+                base64.b64encode(speech_wav_bytes()).decode("ascii"),
+                base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 96_000)).decode("ascii"),
+            )
+        )

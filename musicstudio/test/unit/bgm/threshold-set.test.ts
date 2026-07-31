@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { loopSeamThresholds } from '../../../domain/quality/loop-seam-thresholds';
 import {
+  dialogueCleanupThresholds,
+  duckingThresholds,
+  loudnessNormalizationThresholds,
+  masteringThresholds,
+} from '../../../domain/quality/mastering-thresholds';
+import {
   dialogueTailSilenceThresholds,
   speechPresenceThresholds,
   voiceConversionThresholds,
@@ -69,6 +75,19 @@ describe('membership (Requirement 34.1)', () => {
       'dialogue_tail_silence_min_ms',
       'dialogue_tail_silence_max_ms',
       'voice_conversion_length_tolerance_ms',
+      // The seven mastering members are Requirement 30.6–30.16's numbers, appended by task
+      // 3.3 for the same reason: 30.6, 30.8, 30.9, 30.10, 30.12 and 30.16 quote them as
+      // initial values, so nothing under `domain/mastering/` or the DSP worker may inline
+      // them. See `domain/quality/mastering-thresholds.ts`. Note that 30.12's *speech
+      // detection* rule is not among them — it is the existing
+      // `speech_detection_*` pair, which dialogue cleanup and ducking both read.
+      'loudness_normalization_target_tolerance_lufs',
+      'loudness_normalization_idempotence_gain_db',
+      'dialogue_cleanup_non_speech_attenuation_min_db',
+      'dialogue_cleanup_speech_loudness_tolerance_lufs',
+      'dialogue_cleanup_length_tolerance_ms',
+      'ducking_depth_accuracy_db',
+      'ducking_non_speech_hold_db',
     ]);
   });
 
@@ -174,6 +193,66 @@ describe('the speech projections (Requirements 25.19, 26.5, 26.25, 34.3, 34.6)',
     expect(voiceConversionThresholds(change.set)).toEqual({
       version: INITIAL_QUALITY_THRESHOLD_SET_VERSION + 1,
       lengthToleranceMs: 250,
+    });
+  });
+});
+
+describe('the mastering projections (Requirements 30.6–30.16, 34.3, 34.6)', () => {
+  it('reads Requirement 30.6 and 30.8\u2019s two numbers and the set version together', () => {
+    expect(loudnessNormalizationThresholds(INITIAL_QUALITY_THRESHOLD_SET)).toEqual({
+      version: INITIAL_QUALITY_THRESHOLD_SET_VERSION,
+      targetToleranceLufs: 0.5,
+      idempotenceGainDb: 0.1,
+    });
+  });
+
+  it('reads Requirement 30.9 and 30.10\u2019s three numbers', () => {
+    expect(dialogueCleanupThresholds(INITIAL_QUALITY_THRESHOLD_SET)).toEqual({
+      version: INITIAL_QUALITY_THRESHOLD_SET_VERSION,
+      nonSpeechAttenuationMinDb: 10.0,
+      speechLoudnessToleranceLufs: 1.0,
+      lengthToleranceMs: 10,
+    });
+  });
+
+  it('reads Requirement 30.12 and 30.16\u2019s two numbers', () => {
+    expect(duckingThresholds(INITIAL_QUALITY_THRESHOLD_SET)).toEqual({
+      version: INITIAL_QUALITY_THRESHOLD_SET_VERSION,
+      depthAccuracyDb: 1.0,
+      nonSpeechHoldDb: 0.5,
+    });
+  });
+
+  it('reuses the existing speech-presence pair rather than adding a second definition', () => {
+    // Requirement 30.12's speech rule is the same one Requirement 26.5 reads, and the
+    // glossary defines 발화 구간 by Requirement 30. Dialogue cleanup and ducking therefore
+    // read `speech_detection_*` rather than introducing `ducking_speech_*`.
+    expect(masteringThresholds(INITIAL_QUALITY_THRESHOLD_SET)).toMatchObject({
+      speechRmsThresholdDb: -45.0,
+      speechMinDurationMs: 200,
+    });
+  });
+
+  it('composes all of Requirement 30\u2019s numbers at one version', () => {
+    const all = masteringThresholds(INITIAL_QUALITY_THRESHOLD_SET);
+
+    expect(all.version).toBe(INITIAL_QUALITY_THRESHOLD_SET_VERSION);
+    expect(all.idempotenceGainDb).toBe(0.1);
+    expect(all.nonSpeechAttenuationMinDb).toBe(10.0);
+    expect(all.depthAccuracyDb).toBe(1.0);
+  });
+
+  it('carries the new version after a change, so a verdict cannot cite a stale one', () => {
+    const change = changeThreshold(
+      INITIAL_QUALITY_THRESHOLD_SET,
+      'dialogue_cleanup_non_speech_attenuation_min_db',
+      18,
+    );
+    if (change.kind !== 'applied') throw new Error('expected the change to apply');
+
+    expect(dialogueCleanupThresholds(change.set)).toMatchObject({
+      version: INITIAL_QUALITY_THRESHOLD_SET_VERSION + 1,
+      nonSpeechAttenuationMinDb: 18,
     });
   });
 });

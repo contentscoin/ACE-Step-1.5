@@ -37,6 +37,18 @@ dependencies = [
     # exists and the effects tests skip with a stated reason on a host without it,
     # rather than failing collection.
     "pedalboard>=0.9.12",
+    # Design §5.5's loudness library: BS.1770-4 measurement and normalisation for
+    # Requirement 30.24 (dsp/src/musicstudio_dsp/loudness.py). Moved out of the `audio`
+    # extra by task 3.3, for the same reason `pedalboard` is in the default set — **CI runs
+    # `pip install -e '.[dev]'` only**, so anything the ordinary test suite needs must be
+    # resolvable by that command, and `test_loudness.py`/`test_mastering.py` are ordinary
+    # tests. Leaving it in the extra would have made every mastering test skip in CI.
+    #
+    # It qualifies more easily than `pedalboard` did: pure Python over numpy and scipy, no
+    # native extension of its own and therefore no platform library to be missing. `scipy`
+    # arrives with it as a manylinux wheel (~35 MB) — the only real cost, and one already
+    # implied by design §5.5 naming the library.
+    "pyloudnorm>=0.1.1",
 ]
 
 [project.optional-dependencies]
@@ -52,7 +64,6 @@ dependencies = [
 # stated, when no binary is present.
 audio = [
     "librosa>=0.10.2",
-    "pyloudnorm>=0.1.1",
     "pydub>=0.25.1",
 ]
 dev = [

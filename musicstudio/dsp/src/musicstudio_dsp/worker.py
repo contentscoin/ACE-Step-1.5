@@ -46,6 +46,8 @@ from celery import Celery
 
 from .effects import apply_chain, parse_chain
 from .formats import AudioFormat, decode, encode
+from .loudness import measure
+from .mastering import clean_dialogue, duck, normalise_loudness
 from .pipeline import (
     STORAGE_FORMAT,
     convert_for_download,
@@ -57,8 +59,12 @@ __all__ = [
     "DEFAULT_RESULT_BACKEND",
     "apply_effect_chain_task",
     "celery_app",
+    "clean_dialogue_task",
     "convert_for_download_task",
+    "duck_task",
+    "measure_loudness_task",
     "normalise_for_storage_task",
+    "normalise_loudness_task",
 ]
 
 #: Overridden per environment. Design §11.3's topology supplies the real one.
@@ -152,3 +158,140 @@ def apply_effect_chain_task(
         "original_duration_ms": result.original_duration_ms,
         "tail_truncated": result.tail_truncated,
     }
+
+
+
+@celery_app.task(name="musicstudio_dsp.measure_loudness")
+def measure_loudness_task(audio_base64: str) -> dict[str, Any]:
+    """Requirements 30.22, 30.24. Shell over :func:`loudness.measure`.
+
+    Both the unrounded and the reported forms cross the seam. Requirement 30.24's rounding
+    is for *reporting*, while Requirements 30.6 and 30.8 are judged on full precision, so a
+    task that returned only one of the two would force the product layer either to re-round
+    or to compare a bound of 0.1 against numbers already quantised to 0.1.
+    """
+    report = measure(decode(base64.b64decode(audio_base64)))
+    return {"measurement": report.as_dict(), "reported": report.reported().as_dict()}
+
+
+@celery_app.task(name="musicstudio_dsp.normalise_loudness")
+def normalise_loudness_task(
+    audio_base64: str,
+    target_lufs: float | None = None,
+    target_tolerance_lufs: float | None = None,
+    audio_format: AudioFormat = STORAGE_FORMAT,
+) -> dict[str, Any]:
+    """Requirements 30.6, 30.7, 30.8, 30.25. Shell over :func:`mastering.normalise_loudness`.
+
+    ``target_tolerance_lufs`` is a parameter rather than a constant because it is a
+    Quality_Threshold_Set member and Requirement 34.4 lets an operator change it between two
+    runs; the product layer sends the value in force. Omitted, the worker falls back to the
+    initial value in ``mastering_registry.json``.
+    """
+    result = normalise_loudness(
+        decode(base64.b64decode(audio_base64)),
+        target_lufs,
+        target_tolerance_lufs=target_tolerance_lufs,
+    )
+    return {
+        "audio_base64": base64.b64encode(encode(result.audio, audio_format)).decode("ascii"),
+        "audio_format": audio_format,
+        "sample_rate": result.audio.sample_rate,
+        "channels": result.audio.channel_count,
+        "frame_count": result.audio.frame_count,
+        "before": result.before.as_dict(),
+        "after": result.after.as_dict(),
+        "applied_gain_db": result.applied_gain_db,
+        "requested_gain_db": result.requested_gain_db,
+        "true_peak_limited": result.true_peak_limited,
+        "target_missed": result.target_missed,
+        "measurable": result.measurable,
+        "target_lufs": result.target_lufs,
+        "shortfall_lufs": result.shortfall_lufs,
+    }
+
+
+@celery_app.task(name="musicstudio_dsp.clean_dialogue")
+def clean_dialogue_task(
+    audio_base64: str,
+    speech_rms_threshold_db: float | None = None,
+    speech_min_duration_ms: float | None = None,
+    non_speech_attenuation_db: float | None = None,
+    audio_format: AudioFormat = STORAGE_FORMAT,
+) -> dict[str, Any]:
+    """Requirements 30.9, 30.10. Shell over :func:`mastering.clean_dialogue`."""
+    result = clean_dialogue(
+        decode(base64.b64decode(audio_base64)),
+        rms_threshold_db=speech_rms_threshold_db,
+        min_duration_ms=speech_min_duration_ms,
+        attenuation_db=non_speech_attenuation_db,
+    )
+    return {
+        "audio_base64": base64.b64encode(encode(result.audio, audio_format)).decode("ascii"),
+        "audio_format": audio_format,
+        "sample_rate": result.audio.sample_rate,
+        "channels": result.audio.channel_count,
+        "frame_count": result.audio.frame_count,
+        "speech_regions": [region.as_dict() for region in result.speech_regions],
+        # `-inf` is not valid JSON, so an unmeasurable level crosses as `null`. The product
+        # layer branches on `has_non_speech` rather than on the value, for the reason
+        # `services/mastering/ports.ts` states.
+        "non_speech_rms_before_db": _finite(result.non_speech_rms_before_db),
+        "non_speech_rms_after_db": _finite(result.non_speech_rms_after_db),
+        "speech_loudness_before_lufs": _finite(result.speech_loudness_before_lufs),
+        "speech_loudness_after_lufs": _finite(result.speech_loudness_after_lufs),
+        "input_duration_ms": result.input_duration_ms,
+        "output_duration_ms": result.output_duration_ms,
+        "applied_floor_db": result.applied_floor_db,
+        "has_non_speech": result.has_non_speech,
+    }
+
+
+@celery_app.task(name="musicstudio_dsp.duck")
+def duck_task(
+    dialogue_base64: str,
+    music_base64: str,
+    depth_db: float | None = None,
+    attack_ms: float | None = None,
+    release_ms: float | None = None,
+    speech_rms_threshold_db: float | None = None,
+    speech_min_duration_ms: float | None = None,
+    audio_format: AudioFormat = STORAGE_FORMAT,
+) -> dict[str, Any]:
+    """Requirements 30.12–30.17. Shell over :func:`mastering.duck`.
+
+    Two audio payloads because Requirement 30.12's operation is asymmetric: speech is
+    detected in the dialogue track and the *music* track is the one attenuated. Only the
+    music track comes back — the dialogue track is read and never modified.
+    """
+    result = duck(
+        decode(base64.b64decode(dialogue_base64)),
+        decode(base64.b64decode(music_base64)),
+        depth_db=depth_db,
+        attack_ms=attack_ms,
+        release_ms=release_ms,
+        rms_threshold_db=speech_rms_threshold_db,
+        min_duration_ms=speech_min_duration_ms,
+    )
+    return {
+        "audio_base64": base64.b64encode(encode(result.audio, audio_format)).decode("ascii"),
+        "audio_format": audio_format,
+        "sample_rate": result.audio.sample_rate,
+        "channels": result.audio.channel_count,
+        "frame_count": result.audio.frame_count,
+        "speech_regions": [region.as_dict() for region in result.speech_regions],
+        "automation_points": result.automation_as_dicts(),
+        "duration_ms": result.duration_ms,
+    }
+
+
+def _finite(value: float) -> float | None:
+    """`-inf`/`inf`/`NaN` as `null`, since none of them is valid JSON.
+
+    The TypeScript side reads `null` back as `-Infinity`. Encoding it as a large negative
+    number instead would make a silent section look like a very quiet one, which is exactly
+    the distinction Requirement 30.6 turns on.
+    """
+    import math
+
+    return None if not math.isfinite(value) else value

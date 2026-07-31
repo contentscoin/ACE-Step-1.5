@@ -105,6 +105,42 @@ export const QUALITY_THRESHOLD_NAMES = [
    * measurement meant. Requirement 34.1 does not name it either; see the note above.
    */
   'voice_conversion_length_tolerance_ms',
+  /**
+   * Requirements 30.6, 30.8 — how far the achieved integrated loudness may sit from the
+   * requested target and still count as normalised.
+   *
+   * A member rather than a constant for the reason note 3 gives: it is a ceiling on a
+   * *measured error*, so moving it changes only which results are admissible and never
+   * what an already-recorded measurement meant. It is also the *precondition* of Property
+   * 15 — the idempotence claim is made about audio already inside this band — so the
+   * property and the requirement read one number rather than two that happen to agree.
+   */
+  'loudness_normalization_target_tolerance_lufs',
+  /**
+   * Requirement 30.8 — the gain-change ceiling on a re-application.
+   *
+   * This is the number Property 15 asserts. It is a member rather than a literal in the
+   * test so the property cannot drift from the clause it validates, and so a calibration
+   * that loosened it would loosen the requirement and the test together, visibly.
+   */
+  'loudness_normalization_idempotence_gain_db',
+  /**
+   * Requirement 30.9 — how far below the input a non-speech section's mean RMS must be
+   * driven by dialogue cleanup.
+   *
+   * A floor on an *achieved* attenuation rather than a ceiling on an error, but the same
+   * argument applies: it decides which cleanups are admissible, not what any already
+   * recorded measurement meant.
+   */
+  'dialogue_cleanup_non_speech_attenuation_min_db',
+  /** Requirement 30.9 — how far the speech sections' loudness may move during cleanup. */
+  'dialogue_cleanup_speech_loudness_tolerance_lufs',
+  /** Requirement 30.10 — cleanup output-vs-input length error ceiling. */
+  'dialogue_cleanup_length_tolerance_ms',
+  /** Requirement 30.12 — how close the achieved duck must sit to the requested depth. */
+  'ducking_depth_accuracy_db',
+  /** Requirement 30.16 — how far the bed may move while no speech is present. */
+  'ducking_non_speech_hold_db',
 ] as const;
 
 export type QualityThresholdName = (typeof QUALITY_THRESHOLD_NAMES)[number];

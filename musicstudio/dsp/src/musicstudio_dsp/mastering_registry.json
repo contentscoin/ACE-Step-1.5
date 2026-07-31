@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "Requirement 30's numbers, mirrored from the TypeScript product layer so the DSP worker",
+    "has no hand-written table of its own. `domain/mastering/bounds.ts` is the single",
+    "declaration; `domain/quality/threshold-set.ts` holds the initial threshold values.",
+    "`test/unit/mastering/registry-parity.test.ts` compares this file against both, in both",
+    "directions, so a change on either side that is not mirrored fails `npm test`.",
+    "This file lives inside the DSP package so it ships in the wheel. Same arrangement as",
+    "`effect_registry.json` (task 3.2).",
+    "`thresholds` are Requirement 34.3 INITIAL values and are defaults only: the product",
+    "layer overrides them per call with the set in force, because Requirement 34.4 lets an",
+    "operator change them between two runs."
+  ],
+  "loudness_target_lufs": { "min": -30.0, "max": -6.0 },
+  "loudness_target_step_lufs": 0.1,
+  "loudness_target_default_lufs": -14.0,
+  "true_peak_ceiling_dbtp": -1.0,
+  "true_peak_takes_priority": true,
+  "true_peak_oversampling": 4,
+  "measurement_report_step": 0.1,
+  "ducking_depth_db": { "min": -24, "max": -3 },
+  "ducking_depth_default_db": -12,
+  "ducking_attack_ms": { "min": 10, "max": 500 },
+  "ducking_attack_default_ms": 50,
+  "ducking_release_ms": { "min": 50, "max": 2000 },
+  "ducking_release_default_ms": 300,
+  "speech_window_ms": 100,
+  "suggestion_timeout_ms": 120000,
+  "suggestion_fallback_deadline_ms": 5000,
+  "octave_band_centres_hz": [31.5, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+  "thresholds": {
+    "speech_detection_rms_threshold_db": -45.0,
+    "speech_detection_min_duration_ms": 200,
+    "loudness_normalization_target_tolerance_lufs": 0.5,
+    "loudness_normalization_idempotence_gain_db": 0.1,
+    "dialogue_cleanup_non_speech_attenuation_min_db": 10.0,
+    "dialogue_cleanup_speech_loudness_tolerance_lufs": 1.0,
+    "dialogue_cleanup_length_tolerance_ms": 10,
+    "ducking_depth_accuracy_db": 1.0,
+    "ducking_non_speech_hold_db": 0.5
+  }
+}

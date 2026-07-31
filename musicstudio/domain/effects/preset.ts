@@ -112,6 +112,34 @@ const BUILT_IN_DEFINITIONS: readonly BuiltInDefinition[] = [
       { kind: 'gain', parameters: { gain_db: 3 } },
     ],
   },
+  /**
+   * Requirement 30.21's fallback, added by task 3.3.
+   *
+   * When the parameter-suggestion service is unavailable, Requirement 30.21 requires a
+   * default suggestion "내장 Effect_Preset 기반" within 5 seconds. That is only literally
+   * possible if one of the built-ins is a mastering chain, and none of the four above is —
+   * they are creative colours. So the population grows by one, which Requirement 29.21
+   * permits ("4개 이상").
+   *
+   * The chain is deliberately conservative, because it is what a user gets when the model
+   * could not be reached and nobody chose it: a 30 Hz high-pass to remove rumble that
+   * costs headroom, a gentle 2:1 glue compressor, and no make-up gain at all. The loudness
+   * target is *not* pursued here — that is `Mastering_Assistant`'s normalisation step,
+   * which enforces Requirement 30.7's true-peak ceiling — so this preset changes tone and
+   * leaves level to the code that owns it. A make-up gain here would fight that.
+   */
+  {
+    id: 'builtin_master_bus',
+    name: 'Master Bus',
+    items: [
+      { kind: 'highpass', parameters: { cutoff_frequency_hz: 30 } },
+      {
+        kind: 'compressor',
+        parameters: { threshold_db: -12, ratio: 2, attack_ms: 20, release_ms: 250 },
+      },
+      { kind: 'gain', parameters: { gain_db: 0 } },
+    ],
+  },
 ];
 
 /**
