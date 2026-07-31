@@ -8,6 +8,7 @@ import type { CreditService } from '../../services/credit';
 import type { JobEventBusPort } from '../../services/generation/job-events';
 import type { JobOrchestrator } from '../../services/generation/job-orchestrator';
 import type { JobRuntime } from '../../services/generation/runtime';
+import type { SongGateway } from '../../services/generation/song-gateway';
 import type { ReportService } from '../../services/moderation/report-service';
 
 import { createAuthenticationHook, registerAuthenticationDecorator } from './authentication';
@@ -18,6 +19,7 @@ import { registerCreditRoutes } from './routes/credit-routes';
 import { registerEngineRoutes } from './routes/engine-routes';
 import { registerGenerationRoutes } from './routes/generation-routes';
 import { registerModerationRoutes } from './routes/moderation-routes';
+import { registerSongRoutes } from './routes/song-routes';
 
 export const API_PREFIX = '/v1';
 
@@ -51,6 +53,15 @@ export interface GatewayGenerationDependencies {
   readonly orchestrator: JobOrchestrator;
   readonly events: JobEventBusPort;
   readonly runtime: JobRuntime;
+  /**
+   * Mounts the Simple/Custom song endpoints (Requirements 3, 4) when supplied.
+   *
+   * Optional beside the generic lifecycle routes rather than implied by them,
+   * because the two are independent: a composition can expose the generic
+   * `/generation-jobs` surface without the song-specific one, and the Requirement 5
+   * tests stay unaffected by Requirements 3 and 4.
+   */
+  readonly songGateway?: SongGateway;
 }
 
 export interface GatewayDependencies {
@@ -114,6 +125,9 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
           clock,
           authenticate,
         });
+        if (deps.generation.songGateway !== undefined) {
+          registerSongRoutes(scope, { gateway: deps.generation.songGateway, authenticate });
+        }
       }
     },
     { prefix: API_PREFIX },

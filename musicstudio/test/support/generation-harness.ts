@@ -26,6 +26,7 @@ import type {
   EngineStatisticsPort,
 } from '../../services/generation/ports';
 import type { JobRuntime } from '../../services/generation/runtime';
+import { SongGateway } from '../../services/generation/song-gateway';
 
 import {
   createManualScheduler,
@@ -217,7 +218,16 @@ export interface GenerationHarness {
   readonly orchestrator: JobOrchestrator;
   readonly runtime: JobRuntime;
   readonly registry: ProviderRegistry;
+  /**
+   * The scripted adapter. Still present when `options.adapter` replaced it in the
+   * registry, in which case it simply sees no traffic — so a test reading this
+   * cannot mistake one for the other.
+   */
   readonly adapter: ScriptedEngineAdapter;
+  /** Whatever is actually registered: the scripted adapter, or the override. */
+  readonly registeredAdapter: EngineAdapter;
+  /** Requirements 3, 4 — present only when the song gateway was requested. */
+  readonly songGateway: SongGateway | null;
   readonly store: JobStorePort;
   readonly queue: JobQueuePort;
   readonly events: JobEventBusPort;
@@ -243,6 +253,16 @@ export interface GenerationHarnessOptions {
   readonly clock?: MutableClock;
   /** Account whose events the harness collects; defaults to `user-1`. */
   readonly accountId?: string;
+  /**
+   * Registers this adapter instead of the scripted one.
+   *
+   * Task 2.1 uses it to drive the real `AceEngineAdapter` over a scripted HTTP
+   * double, so the Requirement 3 end-to-end path exercises the production adapter
+   * rather than a stand-in for it.
+   */
+  readonly adapter?: EngineAdapter;
+  /** Builds the Requirement 3/4 song gateway over this harness's orchestrator. */
+  readonly withSongGateway?: boolean;
 }
 
 export function createGenerationHarness(
@@ -261,6 +281,7 @@ export function createGenerationHarness(
   const queue = createInMemoryJobQueue();
   const events = createInMemoryJobEventBus();
   const adapter = createScriptedEngineAdapter();
+  const registeredAdapter = options.adapter ?? adapter;
 
   const registry = new ProviderRegistry({ clock, auditSink: audit });
   if (options.withoutEngine !== true) {
@@ -268,7 +289,7 @@ export function createGenerationHarness(
       supportedAssetKinds: [assetKind],
       maxOutputDurationMs: 600_000,
     });
-    registry.register({ descriptor, adapter, actorId: 'operator-1' });
+    registry.register({ descriptor, adapter: registeredAdapter, actorId: 'operator-1' });
     registry.setDefaultEngine(assetKind, TEST_ENGINE_ID, 'operator-1');
     // Two consecutive successes are what Requirement 20.21 needs to mark an engine
     // available; without them routing would report `no_available_engine`.
@@ -307,11 +328,16 @@ export function createGenerationHarness(
   const received: JobStatusEvent[] = [];
   events.subscribe(options.accountId ?? 'user-1', (event) => received.push(event));
 
+  const orchestrator = new JobOrchestrator(runtime);
+
   return {
-    orchestrator: new JobOrchestrator(runtime),
+    orchestrator,
     runtime,
     registry,
     adapter,
+    registeredAdapter,
+    songGateway:
+      options.withSongGateway === true ? new SongGateway({ orchestrator, assetKind }) : null,
     store,
     queue,
     events,

@@ -8,6 +8,7 @@
 
 import type { AssetKind } from '../domain/asset-kind';
 import { CANONICAL_SAMPLE_RATE } from '../domain/provenance';
+import type { SongParameters } from '../domain/song/request';
 
 import { ENGINE_JOB_STATE, type EngineJobState, type RawAudioResult } from './engine-job';
 
@@ -43,6 +44,17 @@ export interface NormalizedGenerationRequest {
   readonly seed?: number | null;
   /** Engine chosen explicitly by the caller (Requirement 20.3). */
   readonly engineId?: string;
+  /**
+   * Validated song parameters (Requirements 3, 4), present for Simple/Custom mode
+   * song requests.
+   *
+   * Musical vocabulary, not engine vocabulary: caption, lyrics, BPM, key/scale,
+   * time signature, batch size. Translating those into any one engine's field names
+   * stays inside that engine's adapter, so nothing above the adapter layer learns
+   * an engine's spelling. Absent for requests that carry only a prompt, which every
+   * engine understands without help.
+   */
+  readonly song?: SongParameters;
 }
 
 export interface NormalizedGenerationResult {

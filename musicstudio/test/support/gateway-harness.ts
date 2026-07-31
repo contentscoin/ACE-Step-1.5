@@ -153,6 +153,9 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
             orchestrator: generation.orchestrator,
             events: generation.events,
             runtime: generation.runtime,
+            ...(generation.songGateway === null
+              ? {}
+              : { songGateway: generation.songGateway }),
           },
         }),
   });

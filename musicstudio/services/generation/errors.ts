@@ -18,7 +18,9 @@ export type GenerationErrorCode =
   | 'generation_job_not_found'
   | 'generation_job_not_cancellable'
   | 'generation_job_not_retryable'
-  | 'generation_job_forbidden';
+  | 'generation_job_forbidden'
+  /** Requirements 3.5, 3.8, 4.6 — see `song-errors.ts` for the payload. */
+  | 'song_request_invalid';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

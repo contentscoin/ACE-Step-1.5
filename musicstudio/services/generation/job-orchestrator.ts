@@ -26,6 +26,7 @@
 import type { InputModality } from '../../adapters/normalized-generation';
 import { routeGenerationRequest } from '../../adapters/registry/routing';
 import type { AssetKind } from '../../domain/asset-kind';
+import type { SongParameters } from '../../domain/song/request';
 import type { JobFailure } from '../../domain/generation-job/failure';
 import { isRetryableFailureClass } from '../../domain/generation-job/failure';
 import type { GenerationJobState } from '../../domain/generation-job/lifecycle';
@@ -58,6 +59,15 @@ export interface SubmitJobInput {
   readonly engineId?: string;
   /** Requirement 5.6: how many audio results are expected. */
   readonly resultCount?: number;
+  /**
+   * Validated song parameters (Requirements 3, 4), for Simple/Custom mode requests.
+   *
+   * Carried through untouched: the orchestrator neither reads nor defaults any of
+   * it, because Requirements 3.3 and 4.7 make an absent field an instruction to the
+   * engine rather than a gap to fill. It becomes part of the stored `input`, so a
+   * Requirement 6.4 retry reproduces the same musical request.
+   */
+  readonly song?: SongParameters;
   /**
    * Content policy verdict, evaluated lazily.
    *
@@ -317,5 +327,6 @@ function normaliseInput(input: SubmitJobInput): GenerationJobRecord['input'] {
     ...(input.inputAssetIds === undefined ? {} : { inputAssetIds: input.inputAssetIds }),
     ...(input.seed === undefined ? {} : { seed: input.seed }),
     ...(input.engineId === undefined ? {} : { engineId: input.engineId }),
+    ...(input.song === undefined ? {} : { song: input.song }),
   };
 }
