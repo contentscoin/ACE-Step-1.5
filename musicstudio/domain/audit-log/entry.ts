@@ -18,6 +18,10 @@ export const AUDIT_EVENT_TYPES = [
   'consent_recorded',
   'license_changed',
   'engine_state_changed',
+  // Requirement 6.3: a Generation_Job whose retries are spent, or which timed
+  // out (5.8), is recorded here. `event_type` is `text` in 0008_audit_log.sql, so
+  // this member needs no migration.
+  'generation_job_failed',
   'commercial_use_denied',
   'quality_threshold_changed',
 ] as const;

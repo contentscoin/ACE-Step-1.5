@@ -19,6 +19,11 @@ import type { AssetKind } from '../../domain/asset-kind';
 import { createFakeEngineAdapter, type FakeEngineAdapter } from './fake-engine-adapter';
 import { createFakeRedis, type FakeRedis } from './fake-redis';
 import {
+  createGenerationHarness,
+  type GenerationHarness,
+  type GenerationHarnessOptions,
+} from './generation-harness';
+import {
   createInMemoryAccountRepository,
   type InMemoryAccountRepository,
 } from './in-memory-account-repository';
@@ -49,6 +54,9 @@ export interface GatewayEngineHarness {
   readonly adapterFactory: EngineAdapterFactoryPort;
 }
 
+/** Present only when `generation` was requested (task 1.5 job routes). */
+export type GatewayGenerationHarness = GenerationHarness;
+
 /** Present only when `moderation` was requested (task 6.1 report routes). */
 export interface GatewayModerationHarness {
   readonly reports: ReportService;
@@ -65,6 +73,7 @@ export interface GatewayHarness {
   readonly emails: RecordingEmailSender;
   readonly engines: GatewayEngineHarness | null;
   readonly moderation: GatewayModerationHarness | null;
+  readonly generation: GatewayGenerationHarness | null;
   close(): Promise<void>;
 }
 
@@ -83,6 +92,12 @@ export interface GatewayHarnessOptions {
    * sharing the harness clock so report timestamps are deterministic.
    */
   readonly moderation?: { readonly publishedAssetIds?: readonly string[] };
+  /**
+   * Mounts the Generation_Job routes (Requirements 5.1, 5.3–5.5, 5.7, 6.1, 6.4),
+   * sharing the harness clock so the 900-second budget and the one-second SSE bound
+   * are driven by the same time source the HTTP layer sees.
+   */
+  readonly generation?: Omit<GenerationHarnessOptions, 'clock'>;
 }
 
 /**
@@ -119,6 +134,11 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
       ? null
       : createGatewayModerationHarness(clock, options.moderation);
 
+  const generation =
+    options.generation === undefined
+      ? null
+      : createGenerationHarness({ ...options.generation, clock });
+
   const app = buildGatewayApp({
     accountService,
     clock,
@@ -126,6 +146,15 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
       ? {}
       : { engines: { registry: engines.registry, adapterFactory: engines.adapterFactory } }),
     ...(moderation === null ? {} : { moderation: { reports: moderation.reports } }),
+    ...(generation === null
+      ? {}
+      : {
+          generation: {
+            orchestrator: generation.orchestrator,
+            events: generation.events,
+            runtime: generation.runtime,
+          },
+        }),
   });
 
   return {
@@ -137,8 +166,17 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
     emails,
     engines,
     moderation,
+    generation,
     close: () => app.close(),
   };
+}
+
+/** Returns the generation harness, or throws if the gateway was built without one. */
+export function requireGeneration(harness: GatewayHarness): GatewayGenerationHarness {
+  if (harness.generation === null) {
+    throw new Error('this gateway harness was built without generation routes');
+  }
+  return harness.generation;
 }
 
 /** Returns the moderation harness, or throws if the gateway was built without one. */

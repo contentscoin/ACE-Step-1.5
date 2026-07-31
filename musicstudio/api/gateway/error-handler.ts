@@ -3,6 +3,7 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 import { isRegistryError } from '../../adapters/registry/errors';
 import { isAccountError } from '../../services/account/errors';
 import { isCreditError } from '../../services/credit/errors';
+import { isGenerationError } from '../../services/generation/errors';
 import { isModerationError } from '../../services/moderation/errors';
 
 /**
@@ -49,7 +50,8 @@ export function registerErrorHandler(app: FastifyInstance): void {
       isAccountError(error) ||
       isRegistryError(error) ||
       isModerationError(error) ||
-      isCreditError(error)
+      isCreditError(error) ||
+      isGenerationError(error)
     ) {
       sendDomainError(reply, error);
       return;

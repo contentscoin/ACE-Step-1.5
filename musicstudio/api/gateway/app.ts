@@ -5,6 +5,9 @@ import type { ProviderRegistry } from '../../adapters/registry/provider-registry
 import type { AccountService } from '../../services/account/account-service';
 import { systemClock, type Clock } from '../../services/clock';
 import type { CreditService } from '../../services/credit';
+import type { JobEventBusPort } from '../../services/generation/job-events';
+import type { JobOrchestrator } from '../../services/generation/job-orchestrator';
+import type { JobRuntime } from '../../services/generation/runtime';
 import type { ReportService } from '../../services/moderation/report-service';
 
 import { createAuthenticationHook, registerAuthenticationDecorator } from './authentication';
@@ -13,6 +16,7 @@ import { registerAccountRoutes } from './routes/account-routes';
 import { registerAuthRoutes } from './routes/auth-routes';
 import { registerCreditRoutes } from './routes/credit-routes';
 import { registerEngineRoutes } from './routes/engine-routes';
+import { registerGenerationRoutes } from './routes/generation-routes';
 import { registerModerationRoutes } from './routes/moderation-routes';
 
 export const API_PREFIX = '/v1';
@@ -36,11 +40,26 @@ export interface GatewayModerationDependencies {
   readonly reports: ReportService;
 }
 
+/**
+ * Generation_Job wiring, optional like the engine and moderation blocks.
+ *
+ * The event bus is passed explicitly rather than read off the runtime so it is
+ * visible at the composition site that the SSE routes and the orchestrator share
+ * one bus — which is what the Requirement 5.4 delivery bound depends on.
+ */
+export interface GatewayGenerationDependencies {
+  readonly orchestrator: JobOrchestrator;
+  readonly events: JobEventBusPort;
+  readonly runtime: JobRuntime;
+}
+
 export interface GatewayDependencies {
   readonly accountService: AccountService;
   readonly clock?: Clock;
   readonly engines?: GatewayEngineDependencies;
   readonly moderation?: GatewayModerationDependencies;
+  /** Mounts the Requirement 5 job lifecycle routes when supplied. */
+  readonly generation?: GatewayGenerationDependencies;
   /** Mounts the Requirement 2.7 / 2.9–2.11 credit read routes when supplied. */
   readonly creditService?: CreditService;
   readonly fastifyOptions?: FastifyServerOptions;
@@ -86,6 +105,15 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
       }
       if (deps.creditService !== undefined) {
         registerCreditRoutes(scope, { creditService: deps.creditService, authenticate });
+      }
+      if (deps.generation !== undefined) {
+        registerGenerationRoutes(scope, {
+          orchestrator: deps.generation.orchestrator,
+          events: deps.generation.events,
+          runtime: deps.generation.runtime,
+          clock,
+          authenticate,
+        });
       }
     },
     { prefix: API_PREFIX },
