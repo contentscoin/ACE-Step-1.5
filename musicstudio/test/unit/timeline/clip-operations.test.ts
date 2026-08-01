@@ -22,7 +22,7 @@ import {
   overlapMs,
   projectViolations,
 } from '../../../domain/timeline/project';
-import { clip, projectWith } from '../../support/timeline-harness';
+import { clip, effectChain, projectWith } from '../../support/timeline-harness';
 
 /**
  * The clip operations of Requirement 28, by example.
@@ -384,5 +384,106 @@ describe('gain and fade bounds (Requirements 28.16, 28.17)', () => {
     const odd = projectWith([clip({ id: 'a', sourceDurationMs: 7 })]);
     expect(planClipFades(odd, 'a', { fadeInMs: 3, fadeOutMs: 3 }).ok).toBe(true);
     expect(planClipFades(odd, 'a', { fadeInMs: 4, fadeOutMs: 0 }).ok).toBe(false);
+  });
+});
+
+
+describe('a clip\'s Effect_Chain through the edit operations (Requirement 29.31)', () => {
+  const chain = effectChain(['reverb']);
+
+  it('is `null` for a clip added without one', () => {
+    const plan = planAddClip(projectWith([]), {
+      clipId: 'a',
+      assetId: 'asset-0',
+      sourceDurationMs: 4_000,
+      track: 0,
+    });
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const project = executeCommand(projectWith([]), plan.command);
+    expect(project.clips[0]?.effectChain).toBeNull();
+  });
+
+  it('is stored when a clip is added with one', () => {
+    // Requirement 28.23 lists twelve operations and none of them is "set a clip's chain", so this
+    // is the one place an edit can attach one. See the note on `AddClipRequest` and the task 4.3
+    // report's open questions.
+    const plan = planAddClip(projectWith([]), {
+      clipId: 'a',
+      assetId: 'asset-0',
+      sourceDurationMs: 4_000,
+      track: 0,
+      effectChain: chain,
+    });
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const project = executeCommand(projectWith([]), plan.command);
+    expect(project.clips[0]?.effectChain).toEqual(chain);
+    expect(isValidTimelineProject(project)).toBe(true);
+  });
+
+  it('refuses a clip added with an invalid chain', () => {
+    const plan = planAddClip(projectWith([]), {
+      clipId: 'a',
+      assetId: 'asset-0',
+      sourceDurationMs: 4_000,
+      track: 0,
+      // Requirement 29.13's ceiling is 16 items.
+      effectChain: { items: [] },
+    });
+
+    expect(plan.ok).toBe(false);
+    if (plan.ok) return;
+    expect(plan.violations.map((violation) => violation.violation)).toContain(
+      'clip_effect_chain_invalid',
+    );
+  });
+
+  it('gives both halves of a split the original\'s chain', () => {
+    // Each half is a clip over the same asset, and Requirement 29.31 makes a chain a per-clip
+    // setting; giving it to one half would silently unprocess the other.
+    const project = projectWith([
+      clip({ id: 'a', track: 0, startTimeMs: 0, sourceDurationMs: 4_000, effectChain: chain }),
+    ]);
+    const plan = planSplitClip(project, { clipId: 'a', atMs: 2_000, leftClipId: 'l', rightClipId: 'r' });
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const split = executeCommand(project, plan.command);
+    expect(split.clips.map((c) => c.effectChain)).toEqual([chain, chain]);
+  });
+
+  it('gives a duplicate the original\'s chain', () => {
+    const project = projectWith([
+      clip({ id: 'a', track: 0, startTimeMs: 0, sourceDurationMs: 4_000, effectChain: chain }),
+    ]);
+    const plan = planDuplicateClip(project, { clipId: 'a', newClipId: 'a2' });
+
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const duplicated = executeCommand(project, plan.command);
+    expect(duplicated.clips[1]?.effectChain).toEqual(chain);
+  });
+
+  it('leaves the chain alone when a clip is moved, trimmed, re-gained or re-faded', () => {
+    const project = projectWith([
+      clip({ id: 'a', track: 0, startTimeMs: 1_000, sourceDurationMs: 4_000, effectChain: chain }),
+    ]);
+
+    const plans = [
+      planMoveClip(project, { clipId: 'a', startTimeMs: 2_000 }),
+      planTrimClip(project, { clipId: 'a', trimStartMs: 500, trimEndMs: 0 }),
+      planClipGain(project, 'a', -6),
+      planClipFades(project, 'a', { fadeInMs: 100, fadeOutMs: 0 }),
+    ];
+
+    for (const plan of plans) {
+      expect(plan.ok).toBe(true);
+      if (!plan.ok) continue;
+      const edited = executeCommand(project, plan.command);
+      expect(edited.clips[0]?.effectChain).toEqual(chain);
+    }
   });
 });

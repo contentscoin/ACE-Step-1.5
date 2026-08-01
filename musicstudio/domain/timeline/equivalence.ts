@@ -16,6 +16,15 @@
  * - **within 0.01**: pan;
  * - **excluded**: undo history, and created/updated times.
  *
+ * One field is compared that 28.32 does not enumerate: **the clip's `Effect_Chain`**. 28.32
+ * predates it — Requirement 29.31 is what puts a chain on a clip — and the enumeration is a
+ * list of what must match, not a prohibition on more. It has to be compared, because a round
+ * trip that dropped a clip's chain would produce a project that renders differently
+ * (Requirement 29.31) while Property 6 reported success. It is compared with Requirement
+ * 29.26's own chain equivalence relation, so there is one definition of chain equality in the
+ * system rather than a timeline-flavoured second one. The same argument the tempo is compared
+ * under, below.
+ *
  * The exclusions need no code: `TimelineProject` holds none of those three (see
  * `project.ts`), which is why it does not. That is the point of keeping them out of the
  * type — an exclusion enforced by the shape cannot be forgotten by a comparison.
@@ -35,6 +44,8 @@
  * Every mismatch returns a reason. A property failure that says only `false` costs a
  * debugging session; one that says `clip 3 startTimeMs 1200 !== 1201` does not.
  */
+
+import { effectChainsEquivalent } from '../effects/equivalence';
 
 import { PROJECT_GAIN_TOLERANCE_DB, PROJECT_PAN_TOLERANCE } from './bounds';
 import {
@@ -98,6 +109,36 @@ export function timelineClipsEquivalent(
   // Iterated over the field list rather than written out, so a twelfth clip field is a type
   // error here rather than a field the relation quietly stops looking at.
   for (const field of TIMELINE_CLIP_FIELDS) {
+    // Requirement 29.31's chain, compared by the **chain equivalence relation** of Requirement
+    // 29.26 rather than by `!==`.
+    //
+    // This branch is not a convenience, it is a correctness requirement. `effectChain` holds an
+    // object, and the `!==` fallback below compares object *identity* — so a parsed clip would
+    // never equal the clip it was printed from, and Property 6 would fail on every project
+    // containing a chain. The opposite mistake is the dangerous one: comparing with
+    // `JSON.stringify` or skipping the field entirely would make Property 6 *pass* while the
+    // printer silently dropped the chain. So the field is compared, and compared with the
+    // relation Requirement 29.26 defines, including its 1e-6 numeric tolerance — a chain travels
+    // through decimal JSON exactly as the gains do.
+    if (field === 'effectChain') {
+      const leftChain = left.effectChain;
+      const rightChain = right.effectChain;
+      if (leftChain === null || rightChain === null) {
+        if (leftChain !== rightChain) {
+          return differs(
+            `${where} effectChain ${leftChain === null ? 'null' : 'present'} !== ` +
+              `${rightChain === null ? 'null' : 'present'}`,
+          );
+        }
+        continue;
+      }
+      const chainVerdict = effectChainsEquivalent(leftChain, rightChain);
+      if (!chainVerdict.equivalent) {
+        return differs(`${where} effectChain: ${chainVerdict.reason}`);
+      }
+      continue;
+    }
+
     if (field in CLIP_NUMERIC_TOLERANCES) {
       const tolerance = CLIP_NUMERIC_TOLERANCES[field as ClipNumericField];
       const leftValue = left[field as ClipNumericField];

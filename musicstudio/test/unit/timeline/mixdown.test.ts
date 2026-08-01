@@ -22,7 +22,7 @@ import {
   sortClipsForSummation,
 } from '../../../domain/timeline/mixdown';
 import { QUALITY_THRESHOLD_NAMES } from '../../../domain/quality/threshold-name';
-import { clip, projectWith } from '../../support/timeline-harness';
+import { clip, effectChain, projectWith } from '../../support/timeline-harness';
 
 /**
  * The mixdown rules that are decidable without audio (Requirements 28.24–28.29).
@@ -260,6 +260,40 @@ describe('mix asset metadata (Requirement 28.28)', () => {
     // quietly stops sending.
     expect(new Set(MIX_METADATA_FIELDS).size).toBe(MIX_METADATA_FIELDS.length);
     expect(MIX_METADATA_FIELDS).toContain('attenuationDb');
+  });
+
+  it('records which clips\' Effect_Chains went into the mix (Requirement 29.31)', () => {
+    // Requirement 28.27's reproducibility is only checkable against a stated parameter set, and a
+    // clip's chain changes its samples exactly as its gain does. A stored mix that did not say
+    // which chains it contained could not be compared with a re-render, because the project's
+    // chains can be changed afterwards.
+    expect(MIX_METADATA_FIELDS).toContain('effectChainClipIds');
+  });
+});
+
+describe('the plan names the clips carrying an Effect_Chain (Requirement 29.31)', () => {
+  it('lists them in summation order and excludes what is not rendered', () => {
+    const project = projectWith([
+      clip({ id: 'clip-c', track: 2, startTimeMs: 0, effectChain: effectChain(['gain']) }),
+      clip({ id: 'clip-a', track: 0, startTimeMs: 0, effectChain: effectChain(['reverb']) }),
+      clip({ id: 'clip-b', track: 1, startTimeMs: 0 }),
+      // Muted: Requirement 28.20 keeps it out of the render, so its chain is out too.
+      clip({ id: 'clip-d', track: 3, startTimeMs: 0, muted: true, effectChain: effectChain(['delay']) }),
+    ]);
+
+    const plan = planMixdown(project);
+
+    expect(plan.ok).toBe(true);
+    if (plan.ok) {
+      // Ascending clip id, matching `clips`, and no `clip-d`.
+      expect(plan.effectChainClipIds).toEqual(['clip-a', 'clip-c']);
+    }
+  });
+
+  it('is empty for a project whose clips carry no chains', () => {
+    const plan = planMixdown(projectWith([clip({ id: 'clip-a', track: 0 })]));
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.effectChainClipIds).toEqual([]);
   });
 });
 

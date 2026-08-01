@@ -52,6 +52,7 @@
  * `test/unit/bgm/threshold-set.test.ts` is unchanged.
  */
 
+import { clipsWithEffectChains } from './clip-effects';
 import { renderTargetSet, type ExcludedClip, type RenderTargetSet } from './render-target';
 import { clipEndTimeMs, type TimelineClip, type TimelineProject } from './project';
 
@@ -166,6 +167,15 @@ export interface MixdownPlan {
    * direct inputs, so the service needs this list rather than the clip list.
    */
   readonly sourceAssetIds: readonly string[];
+  /**
+   * Requirement 29.31: the render targets that carry an `Effect_Chain`, in summation order.
+   *
+   * On the plan rather than recomputed by the renderer, so that the set the request is built
+   * from, the set the result is checked against and the set recorded on the asset are one list.
+   * Empty for a project whose clips have no chains, which is the majority case and the one
+   * where `requiresEffectProcessor` is false.
+   */
+  readonly effectChainClipIds: readonly string[];
 }
 
 export type MixdownPlanOutcome = MixdownPlan | MixdownRefusal;
@@ -196,6 +206,10 @@ export function planMixdown(project: TimelineProject): MixdownPlanOutcome {
     soloActive: targets.soloActive,
     excluded: targets.excluded,
     sourceAssetIds: [...new Set(clips.map((clip) => clip.assetId))],
+    // Requirement 29.31. Taken from the sorted `clips`, so this list is in summation order and
+    // an excluded clip's chain is not in it — a muted clip contributes no samples and so
+    // contributes no effects either.
+    effectChainClipIds: clipsWithEffectChains(clips),
   };
 }
 
@@ -301,6 +315,16 @@ export interface MixAssetMetadata {
   readonly renderedClipIds: readonly string[];
   /** Requirement 28.19: whether solo narrowed the render. */
   readonly soloActive: boolean;
+  /**
+   * Requirement 29.31: the clips whose `Effect_Chain` was applied to this mix.
+   *
+   * Part of the render's parameter set in the same sense the other fields are: Requirement
+   * 28.27's reproducibility is only checkable against a *stated* parameter set, and a clip's
+   * chain changes its samples exactly as its gain does. A stored mix that did not record which
+   * chains went into it could not be compared against a re-render at all — the chains can be
+   * changed on the project afterwards, and then nothing would say which version this mix was.
+   */
+  readonly effectChainClipIds: readonly string[];
 }
 
 /** Requirement 28.28's field list, for a test that asserts nothing is dropped. */
@@ -316,4 +340,5 @@ export const MIX_METADATA_FIELDS = [
   'durationMs',
   'renderedClipIds',
   'soloActive',
+  'effectChainClipIds',
 ] as const satisfies readonly (keyof MixAssetMetadata)[];

@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { loadMigrations } from '../../../db/runner';
 import {
+  CHAIN_ITEM_COUNT_MAX,
+  CHAIN_ITEM_COUNT_MIN,
+  EFFECT_KINDS,
+  EFFECT_TAIL_ALLOWANCE_MS,
+} from '../../../domain/effects/registry';
+import {
   CLIP_GAIN_DB_MAX,
   CLIP_GAIN_DB_MIN,
   PROJECT_CLIP_COUNT_MAX,
@@ -67,8 +73,55 @@ describe('the migration set still holds together', () => {
   });
 
   it('includes the timeline migration', () => {
-    // Presence, not position: this stays true when 0016 arrives.
+    // Presence, not position: this stays true when 0017 arrives.
     expect(byId.has('0015_timeline_project')).toBe(true);
+  });
+
+  it('includes the clip Effect_Chain migration', () => {
+    expect(byId.has('0016_timeline_clip_effect_chain')).toBe(true);
+  });
+});
+
+describe('timeline_clip Effect_Chain parity (Requirements 29.13, 29.31)', () => {
+  const sql = sqlOf('0016_timeline_clip_effect_chain');
+
+  it('adds the column to 0015\'s table rather than rewriting it', () => {
+    // A new file, not an edit to 0015: `db/runner.ts` records applied ids, so an edited
+    // migration is silently skipped wherever it has already run. See 0016's header.
+    expect(sql).toContain('ALTER TABLE timeline_clip');
+    expect(sql).toContain('ADD COLUMN effect_chain jsonb');
+    expect(ddlOf('0015_timeline_project')).not.toContain('effect_chain');
+  });
+
+  it('uses the same chain item bounds as domain/effects/registry.ts', () => {
+    expect(sql).toContain(
+      `jsonb_array_length(effect_chain) BETWEEN ${String(CHAIN_ITEM_COUNT_MIN)} AND ${String(CHAIN_ITEM_COUNT_MAX)}`,
+    );
+  });
+
+  it('lets the column be NULL, which is how a clip says it has no chain', () => {
+    // Requirement 29.31 is a WHERE clause, so "no chain" is a state the schema must allow. An
+    // empty array is *not* that state: the CHECK's lower bound of 1 refuses it, so there is one
+    // representation of absence and Requirement 28.33's reprint cannot depend on which was used.
+    expect(sql).toContain('effect_chain IS NULL');
+  });
+
+  it('does not restate the effect registry as a constraint', () => {
+    // The eight kinds and their parameter ranges live in `domain/effects/registry.ts`, mirrored
+    // in `effect_registry.json` with a parity test. A CHECK listing them would be a third copy
+    // that no parity test could compare. See 0016's header.
+    const ddl = ddlOf('0016_timeline_clip_effect_chain');
+    for (const kind of EFFECT_KINDS) {
+      expect(ddl).not.toContain(`'${kind}'`);
+    }
+  });
+
+  it('does not store Requirement 29.32\'s tail allowance, which is not clip state', () => {
+    // The allowance bounds a processed Generation_Version's length (0004). Inside a mixdown
+    // there is no tail to bound at all — design §6.3 cuts at the play length.
+    const ddl = ddlOf('0016_timeline_clip_effect_chain');
+    expect(ddl).not.toContain(String(EFFECT_TAIL_ALLOWANCE_MS));
+    expect(ddl).not.toContain('tail');
   });
 });
 

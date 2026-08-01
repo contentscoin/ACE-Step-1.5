@@ -38,6 +38,16 @@ from musicstudio_dsp.worker import (
     render_mixdown_task,
 )
 
+#: The guard ``test_effects.py`` established, named here so the clip-effect shells of
+#: Requirement 29.31 can carry it individually. ``TestApplyEffectChainTask`` below is guarded
+#: as a whole because every one of its tests reaches ``pedalboard``; the mixdown shell's tests
+#: are mixed — a payload with no chain, a null chain or an invalid chain never gets that far —
+#: so only the four that render a chain are skipped on a host without the library.
+requires_pedalboard = pytest.mark.skipif(
+    not pedalboard_available(),
+    reason="pedalboard is unavailable (native wheel needs libatomic.so.1 from the platform)",
+)
+
 TASK_NAMES = (
     "musicstudio_dsp.normalise_for_storage",
     "musicstudio_dsp.convert_for_download",
@@ -524,3 +534,80 @@ class TestRenderMixdownTask:
 
         result = render_mixdown_task.run([self.clip("clip-a", 0, 0)])
         assert json.loads(json.dumps(result))["audio_format"] == "flac"
+
+    # ---------------------------------------- clip effects (Requirements 29.31, 29.32)
+
+    #: The chain as Requirement 29.11 stores it and Requirement 29.24 prints it — which is what
+    #: `services/timeline/mixdown-ports.ts` sends.
+    REVERB_CHAIN = [
+        {
+            "kind": "reverb",
+            "parameters": {
+                "room_size": 0.9,
+                "damping": 0.1,
+                "wet_level": 0.8,
+                "dry_level": 0.2,
+                "width": 1.0,
+            },
+        }
+    ]
+
+    @requires_pedalboard
+    def test_applies_a_clip_effect_chain_from_the_payload(self) -> None:
+        # The task supplies the processor unconditionally, so a payload carrying a chain can never
+        # be rendered dry by a worker invoked without one.
+        wet = self.clip("clip-a", 0, 0) | {"effect_chain": self.REVERB_CHAIN}
+        result = render_mixdown_task.run([wet])
+
+        assert result["clip_effects_applied"] == ["clip-a"]
+        # And the audio really differs from the same clip rendered without the chain.
+        dry = render_mixdown_task.run([self.clip("clip-a", 0, 0)])
+        assert result["audio_base64"] != dry["audio_base64"]
+
+    def test_reports_no_chains_for_a_payload_that_carries_none(self) -> None:
+        result = render_mixdown_task.run([self.clip("clip-a", 0, 0)])
+        assert result["clip_effects_applied"] == []
+
+    def test_reads_a_missing_or_null_effect_chain_as_no_chain(self) -> None:
+        # The same reading `project-parser.ts` gives a document that omits the key.
+        explicit_null = self.clip("clip-a", 0, 0) | {"effect_chain": None}
+        empty = self.clip("clip-b", 1, 0) | {"effect_chain": []}
+        result = render_mixdown_task.run([explicit_null, empty])
+        assert result["clip_effects_applied"] == []
+
+    @requires_pedalboard
+    def test_cuts_the_tail_at_the_clip_play_length(self) -> None:
+        # Requirement 29.31 and design §6.3: the reverb tail does not lengthen the mix.
+        wet = self.clip("clip-a", 0, 0) | {"effect_chain": self.REVERB_CHAIN}
+        result = render_mixdown_task.run([wet])
+
+        assert result["requested_length_ms"] == 100.0
+        assert result["length_error_ms"] <= 10.0
+        assert decode(base64.b64decode(result["audio_base64"])).duration_ms <= 110.0
+
+    @requires_pedalboard
+    def test_is_reproducible_with_clip_effects(self) -> None:
+        # Requirement 28.27 with chains in play. Property 13's extended case asserts this at
+        # sample level over generated projects (`test_mixdown.py`); this is the transport shell's
+        # own check, which also covers the base64 encoding being stable.
+        wet = self.clip("clip-a", 0, 0) | {"effect_chain": self.REVERB_CHAIN}
+        runs = [render_mixdown_task.run([wet]) for _ in range(3)]
+        assert runs[1]["audio_base64"] == runs[0]["audio_base64"]
+        assert runs[2]["audio_base64"] == runs[0]["audio_base64"]
+
+    def test_refuses_a_chain_the_registry_does_not_accept(self) -> None:
+        # Requirements 29.9, 29.10 in the worker: the task accepts whatever is on the queue, so it
+        # validates rather than trusting that the product layer did.
+        broken = self.clip("clip-a", 0, 0) | {
+            "effect_chain": [{"kind": "reverb", "parameters": {"room_size": 99.0}}]
+        }
+        with pytest.raises(Exception):
+            render_mixdown_task.run([broken])
+
+    @requires_pedalboard
+    def test_the_clip_effect_result_is_json_serialisable(self) -> None:
+        import json
+
+        wet = self.clip("clip-a", 0, 0) | {"effect_chain": self.REVERB_CHAIN}
+        result = render_mixdown_task.run([wet])
+        assert json.loads(json.dumps(result))["clip_effects_applied"] == ["clip-a"]

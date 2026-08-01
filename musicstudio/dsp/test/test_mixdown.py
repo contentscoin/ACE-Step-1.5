@@ -31,6 +31,7 @@ not length-sensitive. Long inputs get targeted example-based tests instead
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 import pytest
@@ -38,6 +39,9 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from musicstudio_dsp.audio_buffer import AudioBuffer
+from musicstudio_dsp.clip_effects import clip_effect_processor
+from musicstudio_dsp.effects import pedalboard_available
+from musicstudio_dsp.effects import registry as effect_registry
 from musicstudio_dsp.mixdown import (
     ATTENUATION_DB_MAX,
     MIXDOWN_LENGTH_TOLERANCE_MS,
@@ -55,6 +59,14 @@ from musicstudio_dsp.mixdown import (
     render_mixdown,
 )
 from musicstudio_dsp.resample import INTERNAL_SAMPLE_RATE
+
+#: The guard ``test_effects.py`` established, applied to the two Property 13 cases that route
+#: audio through ``pedalboard``. Property 13's dry cases carry no such dependency and keep
+#: running on every host, so the property itself is never wholly skipped.
+requires_pedalboard = pytest.mark.skipif(
+    not pedalboard_available(),
+    reason="pedalboard is unavailable (native wheel needs libatomic.so.1 from the platform)",
+)
 
 DSP_SETTINGS = settings(
     max_examples=100,
@@ -177,6 +189,51 @@ def render_params() -> st.SearchStrategy[RenderParams]:
         channels=st.sampled_from([1, 2]),
         normalise_peak=st.booleans(),
     )
+
+
+@st.composite
+def clip_effect_chains(draw: st.DrawFn) -> tuple[dict[str, Any], ...]:
+    """A valid ``Effect_Chain`` for a clip (Requirements 29.1–29.13, 29.31).
+
+    Constrained, not filtered: parameter values are drawn inside each kind's registered range,
+    read from the registry rather than written out here, so a range change cannot leave this
+    generator producing chains ``validate_chain`` rejects.
+
+    ``delay`` and ``reverb`` are included deliberately and are the interesting cases — they are
+    the two tail-extending kinds (Requirements 29.30, 29.32), so a chain containing one produces
+    audio longer than the clip's play length, which is exactly what design §6.3's cut is for.
+    Chains are kept to at most two items to keep 100 examples affordable; ``pedalboard`` is the
+    expensive part of these properties.
+    """
+    reg = effect_registry()
+    kinds = draw(st.lists(st.sampled_from(list(reg.kinds)), min_size=1, max_size=2))
+    chain: list[dict[str, Any]] = []
+    for kind in kinds:
+        definition = reg.effects[kind]
+        parameters: dict[str, float] = {}
+        for name, prange in definition.parameters.items():
+            step = draw(st.integers(min_value=0, max_value=8))
+            value = prange.minimum + (prange.maximum - prange.minimum) * step / 8
+            parameters[name] = round(value, 6)
+        chain.append({"kind": kind, "parameters": parameters})
+    return tuple(chain)
+
+
+@st.composite
+def clip_sets_with_effects(draw: st.DrawFn) -> list[MixdownClip]:
+    """A render target set in which some clips carry a chain and some do not.
+
+    Both states matter: Requirement 29.31 is a ``WHERE`` clause, so a mix normally contains a
+    mixture, and the reproducibility claim has to hold for the mixture rather than for the
+    all-wet case only.
+    """
+    clips = draw(clip_specs(draw(st.integers(min_value=1, max_value=3))))
+    return [
+        clip
+        if draw(st.booleans())
+        else MixdownClip(**{**clip.__dict__, "effect_chain": draw(clip_effect_chains())})
+        for clip in clips
+    ]
 
 
 def clip(**overrides: object) -> MixdownClip:
@@ -347,6 +404,29 @@ class TestProperty13MixdownReproducibility:
     order the module fixes itself. Nothing here sets or requires an environment variable,
     and the test records the ambient thread count in its failure message so a future breach
     is diagnosable rather than mysterious.
+
+    ### Clip effects are part of this property, not a separate one
+
+    Requirement 29.31 puts an ``Effect_Chain`` on a clip, and a chain changes the samples exactly
+    as a gain does — so "동일 `Timeline_Project`와 동일 렌더링 파라미터" includes the clips'
+    chains, and the reproducibility claim is *about* a mix that contains them. Task 4.3's
+    acceptance criterion asks for "클립 이펙트 포함 믹스다운 결과 재현성 3회 확인", and that is
+    :meth:`test_three_renders_with_clip_effects_are_sample_identical` below: the same three-render
+    comparison with an ``effect_processor`` supplied.
+
+    It is **an extension of Property 13, not a new numbered property**. Design §10 numbers
+    Properties 1–24 and ``tasks.md`` §9.2 assigns Property 13 to task 4.2 and Property 14 (effect
+    processing reproducibility, Requirement 29.29) to task 3.2; task 4.3 owns no number at all, so
+    inventing one would be a change to §10 that is not task 4.3's to make and would break §9.2's
+    audit. The clause the extended case validates is still 28.27 — it is the same invariant over a
+    project whose clips happen to carry chains.
+
+    The case is worth having because clip effects are the one thing that could break
+    reproducibility for a reason unrelated to summation: ``pedalboard``'s delay lines, reverb tanks
+    and compressor envelopes are *stateful*, so a board reused between clips or between renders
+    would make the second render depend on the first.
+    :func:`musicstudio_dsp.effects.apply_chain` builds a fresh board per call precisely to prevent
+    that, and this is where the prevention is checked at the mixdown level.
     """
 
     #: Requirement 28.27's 3회.
@@ -377,6 +457,85 @@ class TestProperty13MixdownReproducibility:
             assert later.attenuation_db == first.attenuation_db
             assert later.peak_before == first.peak_before
             assert later.rendered_clip_ids == first.rendered_clip_ids
+
+    @requires_pedalboard
+    @given(clips=clip_sets_with_effects(), tracks=track_maps(), params=render_params())
+    @settings(
+        max_examples=100,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
+    )
+    def test_three_renders_with_clip_effects_are_sample_identical(
+        self,
+        clips: list[MixdownClip],
+        tracks: dict[int, TrackState],
+        params: RenderParams,
+    ) -> None:
+        """Requirement 28.27 over a project whose clips carry Effect_Chains (Requirement 29.31).
+
+        Task 4.3's acceptance criterion: "클립 이펙트 포함 믹스다운 결과 재현성 3회 확인". Still
+        Property 13 — see the class docstring on why this is an extension rather than a new number.
+
+        The comparison is the same one: three renders, ``np.array_equal`` on the raw ``float32``
+        arrays. The only difference is ``effect_processor``, which routes every chain through
+        ``pedalboard``. That is the part that could fail: a reused ``Pedalboard`` would carry one
+        clip's delay line into the next clip, and one render's into the next render.
+        """
+        processor = clip_effect_processor()
+        runs = [
+            render_mixdown(clips, tracks, params, effect_processor=processor)
+            for _ in range(self.RUNS)
+        ]
+
+        first = runs[0]
+        # The case has to actually contain a chain, or it is asserting nothing about effects.
+        # Not every draw will — Requirement 29.31 is a WHERE clause and the generator produces
+        # both — so this is recorded rather than assumed.
+        wet = [clip for clip in clips if clip.effect_chain]
+        assert first.clip_effects_applied == tuple(
+            sorted(clip.clip_id for clip in wet)
+        ), "the renderer applied a different set of chains than the clips carry"
+
+        for later in runs[1:]:
+            assert later.audio.frame_count == first.audio.frame_count
+            assert later.audio.channel_count == first.audio.channel_count
+            assert later.audio.sample_rate == first.audio.sample_rate
+            for index, (left, right) in enumerate(zip(first.audio.channels, later.audio.channels)):
+                assert np.array_equal(left, right), (
+                    f"channel {index} differs between renders of a project with "
+                    f"{len(wet)} effected clip(s)"
+                )
+            assert later.attenuation_db == first.attenuation_db
+            assert later.peak_before == first.peak_before
+            assert later.rendered_clip_ids == first.rendered_clip_ids
+            assert later.clip_effects_applied == first.clip_effects_applied
+
+    @requires_pedalboard
+    @given(clips=clip_sets_with_effects(), tracks=track_maps())
+    @settings(
+        max_examples=100,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
+    )
+    def test_a_fresh_processor_per_render_gives_the_same_result(
+        self,
+        clips: list[MixdownClip],
+        tracks: dict[int, TrackState],
+    ) -> None:
+        """Requirement 28.27 "다른 렌더링 작업자에서 처리되는 경우에도", for clip effects.
+
+        A second worker builds its own processor. This constructs one per render rather than
+        sharing one, which is the closest a single process gets to that, and asserts the results
+        are still bit-identical. If ``apply_chain`` ever started caching a board, this is the test
+        that would fail — and it is the failure a cross-worker comparison would show.
+        """
+        runs = [
+            render_mixdown(clips, tracks, effect_processor=clip_effect_processor())
+            for _ in range(self.RUNS)
+        ]
+        for later in runs[1:]:
+            for index, (left, right) in enumerate(zip(runs[0].audio.channels, later.audio.channels)):
+                assert np.array_equal(left, right), f"channel {index} differs across processors"
 
     @given(clips=clip_sets(), tracks=track_maps())
     @DSP_SETTINGS

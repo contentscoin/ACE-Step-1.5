@@ -1,4 +1,4 @@
-"""Deterministic mixdown rendering (Requirements 28.24–28.29, design §5.6, §6.1–§6.3).
+"""Deterministic mixdown rendering (Requirements 28.24–28.29, 29.31, design §5.6, §6.1–§6.3).
 
 Plain callables, like :mod:`musicstudio_dsp.effects` and
 :mod:`musicstudio_dsp.mastering`. Nothing here imports Celery, touches a broker or
@@ -27,17 +27,22 @@ gives for validating a chain the product layer already validated).
 ``load → trim → effects → truncate to play length → gain → fade → place``, in that
 order, for every clip. Two notes:
 
-* **Effects are a wired slot, not a behaviour.** ``MixdownClip.effect_chain`` and the
-  ``effect_processor`` argument exist so the stage sits in the right place in the chain;
-  the behaviour, and in particular the delay/reverb tail policy of Requirement 29.32 and
-  design §6.3, belongs to the task that owns clip effects. A clip that carries a chain
+* **Effects are applied through an injected processor.** ``MixdownClip.effect_chain`` carries
+  Requirement 29.31's chain and the ``effect_processor`` argument applies it;
+  :func:`musicstudio_dsp.clip_effects.clip_effect_processor` is the one the worker supplies,
+  over :func:`musicstudio_dsp.effects.apply_chain`. The processor is injected rather than
+  imported so that this module stays about summation — and so that the tail policy of
+  Requirement 29.32 and design §6.3 is stated in one place,
+  :mod:`musicstudio_dsp.clip_effects`, rather than half here. A clip that carries a chain
   with no processor supplied raises rather than silently dropping the chain — dropping it
   would make a mix that looks finished and is missing the user's edits.
-* **Truncation to the play length is 4.2's, not the effect stage's.** Requirement 28.13
-  makes play length ``source − trim_start − trim_end``, and 28.25's total length is stated
-  over exactly that quantity. So the clip is conformed to its play length whether or not
-  anything lengthened it, and the mix length arithmetic cannot be thrown off by a stage
-  upstream of it.
+* **Truncation to the play length belongs to this module, not to the effect stage.**
+  Requirement 28.13 makes play length ``source − trim_start − trim_end``, and 28.25's total
+  length is stated over exactly that quantity. So the clip is conformed to its play length
+  whether or not anything lengthened it, and the mix length arithmetic cannot be thrown off by
+  a stage upstream of it. This is also Requirement 29.31's cut and design §6.3's "클립 재생
+  길이에서 잘라냄": a delay or reverb tail is discarded here, and the processor is deliberately
+  *not* the thing that discards it, so the rule holds for clips with no chain too.
 
 ### Track volume and pan are folded into the per-clip gain, and that is exact
 
@@ -229,8 +234,9 @@ class MixdownClip:
     gain_db: float = 0.0
     fade_in_ms: int = 0
     fade_out_ms: int = 0
-    #: Design §5.6 step 3's slot. Behaviour belongs to the clip-effects task; see the
-    #: module docstring.
+    #: Requirement 29.31's Effect_Chain, empty for a clip with none. Applied to the *trimmed*
+    #: audio at design §5.6 step 3 and then cut to ``play_length_ms``; see the module docstring
+    #: and :mod:`musicstudio_dsp.clip_effects`.
     effect_chain: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
 
 
@@ -304,6 +310,13 @@ class MixdownResult:
     audio: AudioBuffer
     #: The summation order actually used: ascending ``clip_id``.
     rendered_clip_ids: tuple[str, ...]
+    #: Requirement 29.31: the clips an ``Effect_Chain`` was applied to, in summation order.
+    #:
+    #: Reported rather than left to be inferred from the request, for the reason
+    #: ``tail_truncated`` is reported by :class:`musicstudio_dsp.effects.ProcessedAudio`: a
+    #: dropped chain yields audio that is entirely plausible, so the only way for the product
+    #: layer to know the chains arrived is for the renderer to say which ones it applied.
+    clip_effects_applied: tuple[str, ...]
     #: Requirement 28.25's 구간 길이, computed from clip times in milliseconds.
     requested_length_ms: float
     #: Largest absolute sample before normalisation.
@@ -434,11 +447,15 @@ def _clip_signal(
     params: RenderParams,
     track: TrackState,
     effect_processor: ClipEffectProcessor | None,
-) -> np.ndarray:
+) -> tuple[np.ndarray, bool]:
     """Design §5.6 steps 1–5 for one clip: trim, effects, truncate, gain, fade.
 
     Returns a ``(params.channels, play_frames)`` ``float64`` array ready to be added into
-    the mix at its start offset.
+    the mix at its start offset, and whether an ``Effect_Chain`` was applied to it
+    (Requirement 29.31). The flag is returned from *inside* the branch that applies the chain
+    rather than recomputed from ``clip.effect_chain`` by the caller, so that
+    ``MixdownResult.clip_effects_applied`` witnesses what happened instead of restating what
+    should have.
     """
     if clip.audio.sample_rate != params.sample_rate:
         # Resampling is design §5.2's operation and happens on the way into storage
@@ -464,7 +481,8 @@ def _clip_signal(
     end = max(start, source.shape[1] - _frames(clip.trim_end_ms, params.sample_rate))
     signal = source[:, start:end]
 
-    # 3. Clip effects. See the module docstring: the slot is wired, the behaviour is not.
+    # 3. Clip effects (Requirement 29.31): applied to the *trimmed* audio, before the cut.
+    effects_applied = False
     if clip.effect_chain:
         if effect_processor is None:
             raise MixdownError(
@@ -478,8 +496,14 @@ def _clip_signal(
             clip.effect_chain,
         )
         signal = np.stack(processed.channels, axis=0).astype(np.float64, copy=False)
+        effects_applied = True
 
     # 4. Truncate (or pad) to exactly the play length. See MixdownClip.play_length_ms.
+    #
+    #    This is also Requirement 29.31's "그 결과를 해당 클립의 재생 길이로 잘라낸 뒤" and design
+    #    §6.3's tail rule: a delay or reverb tail that step 3 produced is discarded here, and it
+    #    is discarded before the gain and the fades so that the fade-out of Requirement 28.17
+    #    lands on the clip's last audible millisecond rather than inside a tail about to go.
     play_frames = max(1, _frames(clip.play_length_ms, params.sample_rate))
     if signal.shape[1] > play_frames:
         signal = signal[:, :play_frames]
@@ -508,7 +532,7 @@ def _clip_signal(
     if envelope is not None:
         scaled *= envelope
 
-    return scaled
+    return scaled, effects_applied
 
 
 def render_mixdown(
@@ -528,6 +552,12 @@ def render_mixdown(
     The mix starts at time 0 (Requirement 28.24) and is as long as the latest clip end
     (Requirement 28.25). Clips are summed in ascending ``clip_id`` order, which is what
     Requirements 28.26 and 28.27 rest on — see the module docstring.
+
+    ``effect_processor`` supplies Requirement 29.31's stage 3.
+    :func:`musicstudio_dsp.clip_effects.clip_effect_processor` is the implementation; passing
+    ``None`` while a clip carries a chain raises ``mixdown_clip_effects_unsupported`` rather
+    than rendering the clip dry. The result's ``clip_effects_applied`` names the clips it ran
+    for, so the product layer can check the chains it sent were the chains applied.
     """
     if not clips:
         raise EmptyRenderError()
@@ -566,10 +596,13 @@ def render_mixdown(
     )
 
     output = np.zeros((render_params.channels, total_frames), dtype=np.float64)
+    effects_applied_to: list[str] = []
 
     for clip in ordered:
         track = track_states.get(clip.track, TrackState())
-        signal = _clip_signal(clip, render_params, track, effect_processor)
+        signal, effects_applied = _clip_signal(clip, render_params, track, effect_processor)
+        if effects_applied:
+            effects_applied_to.append(clip.clip_id)
 
         # 7. Place at start_time_ms and sum (Requirements 28.9, 28.24). `+=` over a slice:
         #    elementwise, in index order, no BLAS. See the module docstring.
@@ -604,6 +637,7 @@ def render_mixdown(
     return MixdownResult(
         audio=audio,
         rendered_clip_ids=tuple(clip.clip_id for clip in ordered),
+        clip_effects_applied=tuple(effects_applied_to),
         requested_length_ms=requested_length_ms,
         peak_before=peak_before,
         peak_after=peak_after,

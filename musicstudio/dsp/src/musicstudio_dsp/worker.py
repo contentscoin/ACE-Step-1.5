@@ -44,6 +44,7 @@ from typing import Any, Final
 
 from celery import Celery
 
+from .clip_effects import clip_effect_processor
 from .effects import apply_chain, parse_chain
 from .formats import AudioFormat, decode, encode
 from .loudness import measure
@@ -201,6 +202,20 @@ def render_mixdown_task(
     The attenuation of Requirement 28.28 comes back rather than being applied and forgotten,
     because 28.28 requires it in both the response and the ``mix`` asset's metadata, and only
     the product layer writes assets.
+
+    ### Clip effects (Requirements 29.31, 29.32)
+
+    A clip entry may carry ``effect_chain``, a JSON array in the shape Requirement 29.24's
+    ``Chain_Printer`` produces. The processor is
+    :func:`musicstudio_dsp.clip_effects.clip_effect_processor` and is supplied
+    **unconditionally** — cheap, because :func:`~musicstudio_dsp.mixdown.render_mixdown` calls
+    it only for clips that actually carry a chain — so that a payload containing a chain can
+    never be rendered dry by a worker that happened to be invoked without one.
+
+    ``clip_effects_applied`` comes back so the product layer can check that the chains it sent
+    are the chains that were applied (``clipEffectConsistency`` in
+    ``domain/timeline/clip-effects.ts``). A dropped chain produces entirely plausible audio, so
+    the set is reported rather than assumed.
     """
     params = RenderParams(
         sample_rate=int(sample_rate), channels=int(channels), normalise_peak=bool(normalise_peak)
@@ -225,11 +240,15 @@ def render_mixdown_task(
                 gain_db=float(entry.get("gain_db", 0.0)),
                 fade_in_ms=int(entry.get("fade_in_ms", 0)),
                 fade_out_ms=int(entry.get("fade_out_ms", 0)),
+                # Requirement 29.31. A missing or null key is "no chain", the same reading
+                # `project-parser.ts` gives a document that omits it.
+                effect_chain=tuple(entry.get("effect_chain") or ()),
             )
             for entry in clips
         ],
         track_states,
         params,
+        effect_processor=clip_effect_processor(),
     )
     return {
         "audio_base64": base64.b64encode(encode(result.audio, audio_format)).decode("ascii"),
@@ -239,6 +258,9 @@ def render_mixdown_task(
         "frame_count": result.audio.frame_count,
         "duration_ms": result.duration_ms,
         "rendered_clip_ids": list(result.rendered_clip_ids),
+        # Requirement 29.31: which clips had a chain applied, so the product layer can check
+        # that against what it sent rather than trusting it.
+        "clip_effects_applied": list(result.clip_effects_applied),
         "requested_length_ms": result.requested_length_ms,
         "length_error_ms": result.length_error_ms,
         "peak_before": result.peak_before,

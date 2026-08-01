@@ -127,6 +127,22 @@ describe('unnumbered Timeline_Project serialisation invariants', () => {
             volumeDb: track.volumeDb,
           })),
           clips: project.clips.map((clip) => ({
+            // Requirement 29.31's chain, with the *parameter* keys of every item reversed too.
+            // `chainToDocument` re-orders them from the registry, so a project holding a chain
+            // built in another key order still reprints byte for byte — which is what Requirement
+            // 28.33 needs once a clip can carry a chain, and it would not hold if the printer
+            // spread the chain instead of going through `chainToDocument`.
+            effectChain:
+              clip.effectChain === null
+                ? null
+                : {
+                    items: clip.effectChain.items.map((item) => ({
+                      kind: item.kind,
+                      parameters: Object.fromEntries(
+                        Object.entries(item.parameters).reverse(),
+                      ) as Record<string, number>,
+                    })),
+                  },
             muted: clip.muted,
             fadeOutMs: clip.fadeOutMs,
             fadeInMs: clip.fadeInMs,

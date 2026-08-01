@@ -198,7 +198,7 @@ export function mixdownInputLimitExceeded(sourceAssetIds: readonly string[]): Ge
   );
 }
 
-/** Which of the renderer's own invariants the render broke (Requirements 28.24–28.27). */
+/** Which of the renderer's own invariants the render broke (Requirements 28.24–28.27, 29.31). */
 export type MixdownBreach =
   /** Requirement 28.25's ±10 ms. */
   | 'length_out_of_tolerance'
@@ -209,7 +209,11 @@ export type MixdownBreach =
   /** Requirement 28.26: the worker summed in an order other than the planned one. */
   | 'summation_order_changed'
   /** Requirement 28.27's parameter list: the produced shape is not the requested one. */
-  | 'shape_changed';
+  | 'shape_changed'
+  /** Requirement 29.31: a clip carrying an `Effect_Chain` was rendered without it. */
+  | 'clip_effects_not_applied'
+  /** Requirement 29.31: a chain was applied to a clip that does not carry one. */
+  | 'clip_effects_applied_unexpectedly';
 
 export function mixdownInvariantBreached(
   breach: MixdownBreach,

@@ -95,6 +95,72 @@ describe('the mixdown plan is a function of the project (unnumbered; supports Pr
   });
 });
 
+describe('the planned Effect_Chain set (unnumbered; Requirement 29.31)', () => {
+  /**
+   * Unnumbered. Design §10 numbers no property for this, and task 4.3 owns none — `tasks.md`
+   * §9.2's ownership table has no 4.3 row. Requirement 29.31's *reproducibility with effects* is
+   * asserted over real samples by Property 13 in `dsp/test/test_mixdown.py`, which task 4.3
+   * extended with an `effect_processor` case rather than duplicating under a new number.
+   */
+  it('names exactly the render targets that carry a chain, in summation order', async () => {
+    await fc.assert(
+      fc.asyncProperty(validProject(), async (project) => {
+        const plan = planMixdown(project);
+        if (!plan.ok) return;
+
+        // Membership: every named clip is a target with a chain, and no target with a chain is
+        // left out. A plan that missed one would have the renderer demand a chain the worker was
+        // never sent, or send a chain that goes unchecked.
+        const expected = plan.clips
+          .filter((clip) => clip.effectChain !== null)
+          .map((clip) => clip.id);
+        expect(plan.effectChainClipIds).toEqual(expected);
+
+        // Order: a subsequence of the summation order, so the two lists can be read together.
+        const positions = plan.effectChainClipIds.map((id) =>
+          plan.clips.findIndex((clip) => clip.id === id),
+        );
+        expect(positions).toEqual([...positions].sort((left, right) => left - right));
+        expect(positions.every((position) => position >= 0)).toBe(true);
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('never names an excluded clip, however the mute and solo flags fall', async () => {
+    await fc.assert(
+      fc.asyncProperty(validProject(), async (project) => {
+        const plan = planMixdown(project);
+        if (!plan.ok) return;
+
+        // Requirements 28.19, 28.20: a clip that contributes no samples contributes no effects.
+        const excluded = new Set(plan.excluded.map((entry) => entry.clipId));
+        for (const id of plan.effectChainClipIds) {
+          expect(excluded.has(id)).toBe(false);
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('is insensitive to the order the project lists its clips in', async () => {
+    await fc.assert(
+      fc.asyncProperty(validProject(), fc.integer({ min: 0, max: 8 }), async (project, rotation) => {
+        // The same argument as the plan's clip order, applied to the chain set: Property 12 rests
+        // on the plan being order-insensitive, and the chain set is part of the plan.
+        const first = planMixdown(project);
+        const second = planMixdown(permuted(project, rotation));
+        if (!first.ok || !second.ok) {
+          expect(first.ok).toBe(second.ok);
+          return;
+        }
+        expect(second.effectChainClipIds).toEqual(first.effectChainClipIds);
+      }),
+      { numRuns: 200 },
+    );
+  });
+});
+
 describe('the planned length excludes what is not rendered (unnumbered; Requirement 28.25)', () => {
   it('is the latest end time among the render targets and no other clip', async () => {
     await fc.assert(

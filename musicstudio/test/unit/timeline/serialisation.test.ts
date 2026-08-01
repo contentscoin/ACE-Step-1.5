@@ -14,7 +14,7 @@ import {
   projectToDocument,
 } from '../../../domain/timeline/project-printer';
 import { TIMELINE_CLIP_FIELDS } from '../../../domain/timeline/project';
-import { clip, projectWith } from '../../support/timeline-harness';
+import { clip, effectChain, projectWith } from '../../support/timeline-harness';
 
 /**
  * `Project_Printer` and `Project_Parser` by example (Requirements 28.30–28.34).
@@ -203,6 +203,110 @@ describe('parser faults (Requirements 28.31, 28.34, design §7.2)', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.description).toBe('');
+  });
+});
+
+describe('a clip\'s Effect_Chain in the document (Requirements 29.11, 29.31)', () => {
+  const wet = projectWith([
+    clip({ id: 'a', track: 0, startTimeMs: 0, effectChain: effectChain(['reverb', 'gain']) }),
+    clip({ id: 'b', track: 1, startTimeMs: 0 }),
+  ]);
+
+  it('prints the chain as Requirement 29.11\'s ordered array', () => {
+    const document = projectToDocument(wet);
+    expect(document.clips[0]?.effectChain).toEqual([
+      { kind: 'reverb', parameters: expect.any(Object) as Record<string, number> },
+      { kind: 'gain', parameters: { gain_db: 0 } },
+    ]);
+  });
+
+  it('prints `null`, not `undefined`, for a clip with no chain', () => {
+    // `JSON.stringify` omits an `undefined` value, so an absent chain would produce a document
+    // missing the key — and Requirement 28.33's byte-identity would depend on which path built
+    // the clip.
+    expect(projectToDocument(wet).clips[1]?.effectChain).toBeNull();
+    expect(printProject(wet)).toContain('"effectChain":null');
+  });
+
+  it('round-trips the chain through the parser', () => {
+    const result = parseProjectDocument(printProject(wet));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.clips[0]?.effectChain?.items).toHaveLength(2);
+    expect(result.value.clips[1]?.effectChain).toBeNull();
+    expect(projectsEquivalent(result.value, wet)).toBe(true);
+  });
+
+  it('reads a clip with no `effectChain` key as having no chain', () => {
+    // Requirement 28.30 predates the field, so a document written before it must stay readable.
+    const document = projectToDocument(wet) as unknown as {
+      clips: Record<string, unknown>[];
+    };
+    delete document.clips[1]?.['effectChain'];
+    const result = parseProjectValue(document);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.clips[1]?.effectChain).toBeNull();
+  });
+
+  it('normalises parameter key order on the way in, so the reprint is canonical', () => {
+    // Requirement 29.27's mechanism, inherited: `toChain` fixes parameter order from the registry,
+    // so a hand-written document that listed them differently reprints in the canonical order.
+    const document = JSON.parse(printProject(wet)) as {
+      clips: { effectChain: { kind: string; parameters: Record<string, number> }[] | null }[];
+    };
+    const item = document.clips[0]?.effectChain?.[0];
+    if (item !== undefined) {
+      item.parameters = Object.fromEntries(Object.entries(item.parameters).reverse());
+    }
+    const result = parseProjectValue(document);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(printProject(result.value)).toBe(printProject(wet));
+  });
+
+  it('rejects a document whose chain is invalid, with the clip index (Requirement 28.31)', () => {
+    const document = JSON.parse(printProject(wet)) as {
+      clips: { effectChain: unknown }[];
+    };
+    // Requirement 29.6 caps `gain_db` at 40.
+    (document.clips[0] as { effectChain: unknown }).effectChain = [
+      { kind: 'gain', parameters: { gain_db: 500 } },
+    ];
+
+    const result = parseProjectValue(document);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          index: 0,
+          field: 'effectChain',
+          violation: 'clip_effect_chain_invalid',
+        }),
+      ]),
+    );
+  });
+
+  it('still reports the rest of the document\'s faults alongside a bad chain', () => {
+    // The one promise this parser makes that `Chain_Parser` does not: every fault, not the first.
+    const document = JSON.parse(printProject(wet)) as {
+      clips: { effectChain: unknown; startTimeMs: unknown }[];
+    };
+    (document.clips[0] as { effectChain: unknown }).effectChain = [{ kind: 'nope' }];
+    (document.clips[1] as { startTimeMs: unknown }).startTimeMs = -5;
+
+    const result = parseProjectValue(document);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors.map((error) => error.violation)).toEqual(
+      expect.arrayContaining(['clip_effect_chain_invalid', 'clip_start_time_invalid']),
+    );
+  });
+
+  it('treats a chain difference as a difference (Requirement 28.32)', () => {
+    const dry = { ...wet, clips: [{ ...wet.clips[0], effectChain: null }, wet.clips[1]] };
+    expect(projectsEquivalent(wet, dry as typeof wet)).toBe(false);
   });
 });
 

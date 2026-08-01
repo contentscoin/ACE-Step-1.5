@@ -47,6 +47,7 @@
  */
 
 import type { AudioAsset } from '../../domain/audio-asset';
+import type { EffectItemDocument } from '../../domain/effects/chain-printer';
 import type { MixAssetMetadata } from '../../domain/timeline/mixdown';
 
 /** One render target as the worker needs it. Mirrors `MixdownClip` in `mixdown.py`. */
@@ -62,6 +63,18 @@ export interface MixdownClipRequest {
   readonly gainDb: number;
   readonly fadeInMs: number;
   readonly fadeOutMs: number;
+  /**
+   * Requirement 29.31's chain, or `null`.
+   *
+   * Sent as the **document** form — the JSON array of Requirement 29.11, produced by
+   * `Chain_Printer` — rather than as the domain `EffectChain`. Two reasons, both about the
+   * crossing rather than about convenience: the worker validates what it receives against
+   * Requirement 29.9/29.10 through `validate_chain`, and it should validate the same bytes the
+   * `Chain_Parser` would accept; and `MixdownClip.effect_chain` in
+   * `dsp/src/musicstudio_dsp/mixdown.py` is a sequence of plain mappings, so a wrapper object
+   * would have to be unwrapped on arrival by code that could unwrap it wrongly.
+   */
+  readonly effectChain: readonly EffectItemDocument[] | null;
 }
 
 /** Requirement 28.18's two continuous settings, for one track that has a clip in the mix. */
@@ -101,6 +114,16 @@ export interface MixdownRenderResult {
   readonly durationMs: number;
   /** The order the worker summed in, echoed so the service can check it. */
   readonly renderedClipIds: readonly string[];
+  /**
+   * Requirement 29.31: the clips an `Effect_Chain` was actually applied to.
+   *
+   * Echoed for the same reason `renderedClipIds` is. A worker that dropped a chain returns
+   * audio of the right length, the right shape and an entirely plausible peak — nothing about
+   * the samples reveals the omission — so the only way for this side to know the user's edits
+   * survived the crossing is for the renderer to say which chains it ran.
+   * `clipEffectConsistency` in `domain/timeline/clip-effects.ts` is the comparison.
+   */
+  readonly clipEffectsApplied: readonly string[];
   readonly peakBefore: number;
   readonly peakAfter: number;
   /** Requirement 28.28's 감쇠량. `0` when the peak was already at or below 1.0 (28.24). */

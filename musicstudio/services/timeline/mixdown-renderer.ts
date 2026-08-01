@@ -40,13 +40,55 @@
  *   knows the inputs' licences, and `validateAudioAsset` enforces the one rule that can be
  *   checked locally — a mix may not claim commercial use its own provenance does not permit.
  *   A second fold here would be a second answer to Requirement 33.21's invariant.
- * - **It does not deduct credits.** Requirement 2.12's 믹스다운 단가 × 렌더링 길이 is task
- *   4.3's, and `renderProject` returns the rendered length so that the deduction has a number
- *   to work from.
- * - **It does not apply clip effects.** Requirements 29.31 and 29.32 and design §6.3's tail
- *   policy are task 4.3's. The chain slot exists in the DSP layer (`MixdownClip.effect_chain`)
- *   and `TimelineClip` has no chain field yet, so nothing is dropped: there is nothing to
- *   drop until 4.3 adds it.
+ * ### Clip effects (Requirements 29.31, 29.32; design §6.3)
+ *
+ * Each clip's `Effect_Chain` travels with the clip, in the document form Requirement 29.11
+ * stores. The samples are processed by `dsp/src/musicstudio_dsp/effects.py`'s `apply_chain` and
+ * cut to the clip's play length by `mixdown.py` — the tail policy is stated in
+ * `domain/timeline/clip-effects.ts` and does not need restating here. What this module adds is
+ * the **consistency check**: the chains the worker reports applying must be exactly the chains
+ * that were sent. That check exists because its absence is invisible — a mix rendered without a
+ * clip's chain has the right length, the right shape and a plausible peak.
+ *
+ * ### Credit deduction (Requirement 2.12), and where it sits in the order
+ *
+ * "믹스다운 단가 항목에 렌더링 길이를 반영한 크레딧을 차감한다". The price, the rate card and
+ * the arithmetic are all `Credit_Service`'s (`chargeMixdown`, the `mix:musicstudio-mixdown`
+ * entry, `costOf`); this module supplies the length and the moment. Both of those are
+ * decisions, and they are made this way:
+ *
+ * **The length charged is the plan's, not the produced duration.** Requirement 28.25 *defines*
+ * 렌더링 길이 as `max(start_time_ms + 재생 길이)` over the render targets, which is an integer
+ * computed from stored state before anything is rendered. The produced duration can differ from
+ * it by up to one frame of rounding (0.021 ms at 48 kHz, see `mixdown.py`), and pricing on that
+ * would make the cost of a mix depend on float arithmetic — two renders of one unchanged
+ * project could be charged differently, which sits badly beside Requirement 28.27. Charging the
+ * defined length also means the quote shown before the render is the amount taken after it.
+ *
+ * **The debit happens after a verified render, and the balance is checked before it.**
+ * Requirement 2.3 puts a 402 at request time, so an account that cannot afford the mix is
+ * refused before a worker is asked to spend a minute on it. The debit itself waits until the
+ * render has come back and passed `verify`, because that ordering is what means **no refund
+ * path is needed**: there is never a charge for a mix that does not exist. This system has
+ * exactly one refund path — the job lifecycle's `engine_failed` transition, reached through
+ * `services/sound/job-quality-rejection.ts` — and a second one here would be a second answer to
+ * Requirement 2.4. The residual risk is a balance that drops between the check and the debit,
+ * which surfaces as the same 402 after the render rather than before it; the alternative
+ * (charge first) trades that for a refund path, and the refund path is the worse thing to own.
+ *
+ * `credit` is optional so that the many tests concerned with Requirements 28.24–28.29 need not
+ * supply a ledger. When it is absent nothing is charged and `charge` comes back `null` —
+ * stated in the return type rather than silently, so a composition root that forgot to wire
+ * `Credit_Service` is visible in the outcome instead of quietly rendering for free.
+ *
+ * ### What it deliberately does not do
+ *
+ * - **It does not fold the commercial-use flag.** Requirement 33.20 covers 믹스다운 explicitly
+ *   and `domain/commercial-use.ts` already implements the fold; Property 18 and task 6.3 own
+ *   it. So the provenance and the folded flag arrive *with the request* from the caller that
+ *   knows the inputs' licences, and `validateAudioAsset` enforces the one rule that can be
+ *   checked locally — a mix may not claim commercial use its own provenance does not permit.
+ *   A second fold here would be a second answer to Requirement 33.21's invariant.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -56,8 +98,10 @@ import {
   validateAudioAsset,
   type AudioAsset,
 } from '../../domain/audio-asset';
+import { chainToDocument } from '../../domain/effects/chain-printer';
 import { MAX_PARENTS_PER_ASSET } from '../../domain/lineage/limits';
 import type { AssetProvenance } from '../../domain/provenance';
+import { clipEffectConsistency } from '../../domain/timeline/clip-effects';
 import {
   MIXDOWN_REPRODUCIBILITY_RUNS,
   mixdownLengthWithinTolerance,
@@ -69,6 +113,11 @@ import {
 } from '../../domain/timeline/mixdown';
 import { clipPlayLengthMs, type TimelineProject } from '../../domain/timeline/project';
 import { systemClock, type Clock } from '../clock';
+// Requirement 2.3's 402, from the module that owns it. Imported rather than restated: a second
+// factory for `credit_balance_insufficient` would be a second version of the same contract, and
+// `services/timeline/errors.ts` already imports `GenerationError` from another service for the
+// same reason.
+import { creditBalanceInsufficient } from '../credit/errors';
 
 import {
   mixdownAssetInvalid,
@@ -79,6 +128,7 @@ import {
   timelineProjectForbidden,
   timelineProjectNotFound,
 } from './errors';
+import type { MixdownChargeRecord, MixdownCreditPort } from './credit-ports';
 import type {
   MixdownAssetStore,
   MixdownClipRequest,
@@ -111,6 +161,8 @@ export interface MixdownRendererOptions {
   readonly store: TimelineProjectStore;
   readonly render: MixdownRenderPort;
   readonly mixAssets: MixdownAssetStore;
+  /** Requirement 2.12. Optional; see the header on what its absence means. */
+  readonly credit?: MixdownCreditPort;
   readonly clock?: Clock;
   /** Injectable so tests get stable asset ids. */
   readonly generateId?: () => string;
@@ -127,6 +179,24 @@ export interface RenderMixdownRequest {
   readonly provenance: AssetProvenance;
   /** Requirement 33.20's folded flag, computed by the caller that knows the inputs. */
   readonly commercialUseAllowed: boolean;
+  /**
+   * The account the mixdown is charged to (Requirement 2.12). Defaults to `ownerId`.
+   *
+   * Separate from `ownerId` because Requirement 2 is stated over an account and Requirement 28
+   * over the project's owner, and the two are not the same concept even where they hold the
+   * same identifier today. A caller charging one and authorising the other would be doing
+   * something worth writing down.
+   */
+  readonly accountId?: string;
+  /**
+   * Idempotency key for the deduction (Requirement 2.12).
+   *
+   * `Credit_Service` keys a charge by `jobId` and refuses to debit twice for the same one, so a
+   * retried export that reuses the key is charged once. Defaults to a generated id, which makes
+   * each call a distinct charge — the right default, because two deliberate exports of one
+   * project are two renders and Requirement 2.12 charges for the render.
+   */
+  readonly chargeJobId?: string;
 }
 
 export interface MixdownOutcome {
@@ -136,12 +206,33 @@ export interface MixdownOutcome {
   readonly plan: MixdownPlan;
   /** Requirement 28.28: the attenuation is in the response as well as in the metadata. */
   readonly attenuationDb: number;
+  /** Requirement 2.12's deduction, or `null` when no `Credit_Service` was wired. */
+  readonly charge: MixdownChargeRecord | null;
 }
 
 export function createMixdownRenderer(options: MixdownRendererOptions) {
   const { store, render, mixAssets } = options;
+  const credit = options.credit;
   const clock = options.clock ?? systemClock;
   const generateId = options.generateId ?? randomUUID;
+
+  /**
+   * Requirement 2.12's price for a render of `lengthMs`, without touching the balance.
+   *
+   * `MIXDOWN_RENDERER_ENGINE_ID` is the engine the price is registered against — the same
+   * marker recorded on the asset (Requirement 19.12), so the rate card and the asset agree
+   * about what produced the audio. `outputCount` is 1: a mixdown produces one asset, which is
+   * what `ChargeableAmount` in `domain/credit/pricing.ts` already documents for this case.
+   */
+  function quoteFor(lengthMs: number) {
+    if (credit === undefined) return null;
+    return credit.quote({
+      assetKind: 'mix',
+      engineId: MIXDOWN_RENDERER_ENGINE_ID,
+      durationMs: lengthMs,
+      outputCount: 1,
+    });
+  }
 
   /** Requirement 28.1's ownership check, the same one `timeline-service.ts` applies. */
   async function loadOwned(ownerId: string, projectId: string): Promise<TimelineProject> {
@@ -181,6 +272,8 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
       gainDb: clip.gainDb,
       fadeInMs: clip.fadeInMs,
       fadeOutMs: clip.fadeOutMs,
+      // Requirement 29.31, in the document form Requirement 29.11 stores and 29.24 prints.
+      effectChain: clip.effectChain === null ? null : chainToDocument(clip.effectChain),
     }));
   }
 
@@ -222,6 +315,19 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
       throw mixdownInvariantBreached('summation_order_changed', {
         planned,
         rendered: result.renderedClipIds,
+      });
+    }
+
+    // Requirement 29.31: the chains that were applied must be exactly the chains that were
+    // sent. Checked for the same reason the order is — a renderer that dropped a chain returns
+    // audio of the right length and shape, so nothing else in this function would notice, and
+    // the mix would be stored as the user's edit while containing none of it.
+    const chainBreach = clipEffectConsistency(plan.clips, result.clipEffectsApplied);
+    if (chainBreach !== null) {
+      throw mixdownInvariantBreached(chainBreach.code, {
+        expected: chainBreach.expected,
+        applied: chainBreach.actual,
+        clipIds: chainBreach.clipIds,
       });
     }
 
@@ -298,6 +404,18 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
         throw mixdownInputLimitExceeded(plan.sourceAssetIds);
       }
 
+      // Requirements 2.3, 2.12: priced from Requirement 28.25's length, and refused *before* the
+      // render if the account cannot pay for it. Nothing is debited here — see the header on why
+      // the debit waits until a verified mix exists.
+      const accountId = request.accountId ?? request.ownerId;
+      const quote = quoteFor(plan.lengthMs);
+      if (credit !== undefined && quote !== null) {
+        const { balance } = await credit.usage({ accountId });
+        if (balance < quote.amount) {
+          throw creditBalanceInsufficient({ requiredCredits: quote.amount, balance });
+        }
+      }
+
       const params: MixdownRenderParams = { ...DEFAULT_MIXDOWN_PARAMS, ...request.params };
 
       const result = await render.render({
@@ -323,6 +441,9 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
         durationMs: result.durationMs,
         renderedClipIds: result.renderedClipIds,
         soloActive: plan.soloActive,
+        // Requirement 29.31. The worker's list rather than the plan's, so the metadata records
+        // what was applied; `verify` has already established the two agree.
+        effectChainClipIds: result.clipEffectsApplied,
       };
 
       const asset: AudioAsset = {
@@ -358,7 +479,40 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
         objectKey: result.objectKey,
       });
 
-      return { asset, metadata, render: result, plan, attenuationDb: result.attenuationDb };
+      // Requirement 2.12, last: the mix exists and is stored, so this deduction can never be a
+      // charge for nothing — which is what lets the system keep its single refund path.
+      const charge =
+        credit === undefined
+          ? null
+          : await credit.chargeMixdown({
+              accountId,
+              jobId: request.chargeJobId ?? generateId(),
+              // Requirement 28.25's 렌더링 길이. See the header on why not `result.durationMs`.
+              renderDurationMs: plan.lengthMs,
+            });
+
+      return {
+        asset,
+        metadata,
+        render: result,
+        plan,
+        attenuationDb: result.attenuationDb,
+        charge,
+      };
+    },
+
+    /**
+     * Requirement 2.12's price for a project, without rendering or charging anything.
+     *
+     * Exposed so a client can show the cost before committing to an export, and so the
+     * Requirement 2.3 refusal a caller will hit is predictable rather than discovered. Returns
+     * `null` when no `Credit_Service` is wired, and the plan's refusal when there is nothing to
+     * render — a project that cannot be rendered has no price.
+     */
+    async quoteProject(ownerId: string, projectId: string) {
+      const plan = planMixdown(await loadOwned(ownerId, projectId));
+      if (!plan.ok) return { plan, quote: null };
+      return { plan, quote: quoteFor(plan.lengthMs) };
     },
 
     /** Requirements 28.19, 28.20, 28.25, 28.26, 28.29 without rendering anything. */

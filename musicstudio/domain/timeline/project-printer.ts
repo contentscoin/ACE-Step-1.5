@@ -36,6 +36,8 @@
  * wins. See `project.ts`.
  */
 
+import { chainToDocument, type EffectItemDocument } from '../effects/chain-printer';
+
 import {
   TIMELINE_CLIP_FIELDS,
   TRACK_SETTINGS_FIELDS,
@@ -57,6 +59,17 @@ export interface TimelineClipDocument {
   readonly fadeInMs: number;
   readonly fadeOutMs: number;
   readonly muted: boolean;
+  /**
+   * Requirement 29.31's chain, or `null`.
+   *
+   * Printed through `chainToDocument` rather than by spreading the chain's own objects, so the
+   * parameter key order inside each item is the registry's — which is what makes Requirement
+   * 29.27's byte-identity hold, and therefore what makes 28.33's byte-identity hold for a
+   * project that contains a chain. `null` is written explicitly: `JSON.stringify` drops an
+   * `undefined` value, which would make the reprint of a chain-less clip differ from the
+   * reprint of one whose chain was cleared.
+   */
+  readonly effectChain: readonly EffectItemDocument[] | null;
 }
 
 export interface TrackSettingsDocument {
@@ -110,6 +123,7 @@ function clipToDocument(clip: TimelineClip): TimelineClipDocument {
     fadeInMs: clip.fadeInMs,
     fadeOutMs: clip.fadeOutMs,
     muted: clip.muted,
+    effectChain: clip.effectChain === null ? null : chainToDocument(clip.effectChain),
   };
 }
 

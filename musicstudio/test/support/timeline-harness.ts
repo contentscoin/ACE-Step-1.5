@@ -46,6 +46,13 @@ import {
   TRACK_VOLUME_DB_MIN,
   fadeCeilingMs,
 } from '../../domain/timeline/bounds';
+import { toChain, type EffectChain } from '../../domain/effects/chain';
+import {
+  CHAIN_ITEM_COUNT_MIN,
+  EFFECT_KINDS,
+  EFFECT_REGISTRY,
+  type EffectKind,
+} from '../../domain/effects/registry';
 import { NO_ATTRIBUTION_REQUIRED, type AssetProvenance } from '../../domain/provenance';
 import { createHistory } from '../../domain/timeline/history';
 import {
@@ -54,6 +61,9 @@ import {
   type TimelineProject,
   type TrackSettings,
 } from '../../domain/timeline/project';
+import { costOf } from '../../domain/credit/pricing';
+import { createDefaultPricingTable, MIXDOWN_ENGINE_ID } from '../../services/credit/pricing-table';
+import type { MixdownCreditPort } from '../../services/timeline/credit-ports';
 import type {
   MixdownAssetStore,
   MixdownRenderPort,
@@ -67,6 +77,18 @@ import type {
   TimelineProjectStore,
   TimelineProjectRecord,
 } from '../../services/timeline/ports';
+
+/**
+ * ### Clips carry `Effect_Chain`s, and that is load-bearing for Properties 6 and 7
+ *
+ * Requirement 29.31 puts an optional chain on a clip, so `validProject` generates one for some
+ * clips and `null` for others. This is not decoration: Property 6 (round trip) and Property 7
+ * (byte-identical reprint) are quantified over *valid projects*, and a generator that never
+ * produced a chain would leave the printer's and parser's handling of the field completely
+ * unexercised while both properties reported success. The chain generator draws real parameter
+ * values from `EFFECT_REGISTRY`, so the chains are ones `chainViolations` accepts — the same
+ * construct-don't-filter discipline the clip layout uses.
+ */
 
 /** At most this many clips per generated project. See the header on why it is small. */
 export const GENERATED_CLIP_MAX = 6;
@@ -97,6 +119,53 @@ export function trackPanArbitrary(): fc.Arbitrary<number> {
   return panArbitrary();
 }
 
+/**
+ * A valid `Effect_Chain` for a clip (Requirements 29.1–29.13, 29.31).
+ *
+ * Parameter values are drawn *inside* each kind's registered range, on a grid coarse enough that
+ * a value survives `JSON.stringify` exactly — the round trip is what Property 6 is about, and a
+ * generator producing `0.30000000000000004` would be testing the 1e-6 tolerance of Requirement
+ * 29.26 rather than the printer. The ranges come from the registry rather than being written out,
+ * so a range change cannot leave this generator producing invalid chains.
+ */
+export function clipEffectChainArbitrary(): fc.Arbitrary<EffectChain> {
+  const itemArbitrary = fc
+    .constantFrom(...EFFECT_KINDS)
+    .chain((kind) => {
+      const ranges = EFFECT_REGISTRY[kind].parameters;
+      const names = Object.keys(ranges);
+      return fc
+        .tuple(
+          ...names.map((name) => {
+            const range = ranges[name] as { readonly min: number; readonly max: number };
+            // 21 steps across the range, rounded to 4 decimals: inside the bounds by
+            // construction, and exactly representable through JSON.
+            return fc
+              .integer({ min: 0, max: 20 })
+              .map((step) =>
+                Math.round((range.min + ((range.max - range.min) * step) / 20) * 10_000) / 10_000,
+              );
+          }),
+        )
+        .map((values) => {
+          const parameters: Record<string, number> = {};
+          for (const [index, name] of names.entries()) {
+            parameters[name] = values[index] as number;
+          }
+          return { kind, parameters };
+        });
+    });
+
+  return fc
+    .array(itemArbitrary, { minLength: CHAIN_ITEM_COUNT_MIN, maxLength: 4 })
+    .map((items) => toChain(items));
+}
+
+/** A chain, or `null` — the two states Requirement 29.31's `WHERE` distinguishes. */
+export function optionalClipEffectChainArbitrary(): fc.Arbitrary<EffectChain | null> {
+  return fc.option(clipEffectChainArbitrary(), { nil: null, freq: 2 });
+}
+
 export function trackSettingsArbitrary(): fc.Arbitrary<TrackSettings> {
   return fc.record({
     volumeDb: trackVolumeArbitrary(),
@@ -117,6 +186,8 @@ interface ClipSpec {
   readonly fadeInRatio: number;
   readonly fadeOutRatio: number;
   readonly muted: boolean;
+  /** Requirement 29.31. `null` for most clips; see the header. */
+  readonly effectChain: EffectChain | null;
 }
 
 function clipSpecArbitrary(): fc.Arbitrary<ClipSpec> {
@@ -134,6 +205,7 @@ function clipSpecArbitrary(): fc.Arbitrary<ClipSpec> {
       fadeInRatio: fc.double({ min: 0, max: 0.5, noNaN: true, noDefaultInfinity: true }),
       fadeOutRatio: fc.double({ min: 0, max: 0.5, noNaN: true, noDefaultInfinity: true }),
       muted: fc.boolean(),
+      effectChain: optionalClipEffectChainArbitrary(),
     })
     .map((spec) => {
       const trimStartMs = Math.floor(spec.sourceDurationMs * spec.trimStartRatio);
@@ -148,6 +220,7 @@ function clipSpecArbitrary(): fc.Arbitrary<ClipSpec> {
         fadeInRatio: spec.fadeInRatio,
         fadeOutRatio: spec.fadeOutRatio,
         muted: spec.muted,
+        effectChain: spec.effectChain,
       };
     });
 }
@@ -183,6 +256,7 @@ function placeClips(specs: readonly ClipSpec[], assetIds: readonly string[]): Ti
       fadeInMs: Math.min(Math.floor(playLengthMs * spec.fadeInRatio), ceiling),
       fadeOutMs: Math.min(Math.floor(playLengthMs * spec.fadeOutRatio), ceiling),
       muted: spec.muted,
+      effectChain: spec.effectChain,
     });
   }
 
@@ -321,8 +395,30 @@ export function clip(overrides: Partial<TimelineClip> = {}): TimelineClip {
     fadeInMs: 0,
     fadeOutMs: 0,
     muted: false,
+    effectChain: null,
     ...overrides,
   };
+}
+
+/**
+ * A valid `Effect_Chain`, for the example-based tests.
+ *
+ * `reverb` by default because it is one of the two tail-extending kinds (Requirements 29.30,
+ * 29.32), so the default case is the interesting one for the tail policy.
+ */
+export function effectChain(
+  kinds: readonly EffectKind[] = ['reverb'],
+): EffectChain {
+  return toChain(
+    kinds.map((kind) => {
+      const parameters: Record<string, number> = {};
+      for (const [name, range] of Object.entries(EFFECT_REGISTRY[kind].parameters)) {
+        // The midpoint: inside the range whatever the range is.
+        parameters[name] = Math.round(((range.min + range.max) / 2) * 10_000) / 10_000;
+      }
+      return { kind, parameters };
+    }),
+  );
 }
 
 
@@ -364,6 +460,11 @@ export function stubMixdownRenderPort(overrides: Partial<MixdownRenderResult> = 
           frameCount,
           durationMs: request.expectedLengthMs,
           renderedClipIds: request.clips.map((clip) => clip.clipId),
+          // Requirement 29.31: derived from the request, so the default is a *faithful* worker
+          // and a test that wants to simulate a dropped chain has to say so through `overrides`.
+          clipEffectsApplied: request.clips
+            .filter((clip) => clip.effectChain !== null)
+            .map((clip) => clip.clipId),
           peakBefore: 0.5,
           peakAfter: 0.5,
           attenuationDb: 0,
@@ -385,6 +486,78 @@ export function recordingMixAssetStore(): MixdownAssetStore & {
     save: (mix) => {
       saved.push(mix);
       return Promise.resolve();
+    },
+  };
+}
+
+/**
+ * A `MixdownCreditPort` over a single balance, recording every charge (Requirement 2.12).
+ *
+ * It prices with the **real** rate card and the real `costOf`, so the amounts a test asserts are
+ * the amounts production would charge — a fake that invented its own price would let the
+ * renderer send the wrong duration without any test noticing. What is faked is only the
+ * *balance*: the real `Credit_Service` needs a Redis balance store, a ledger and a plan store,
+ * none of which is reachable here, and none of which Requirement 2.12 is about.
+ *
+ * `Credit_Service`'s own behaviour — the atomic debit, the 402, the idempotency by `jobId`, the
+ * audit entry — is covered by `test/unit/credit/credit-service.test.ts` and
+ * `test/property/credit-atomicity.test.ts` against the real service.
+ */
+export function fakeMixdownCredit(
+  balance = 1_000_000,
+): MixdownCreditPort & {
+  readonly charges: { readonly jobId: string; readonly renderDurationMs: number; readonly amount: number }[];
+  readonly balanceNow: () => number;
+} {
+  const pricing = createDefaultPricingTable();
+  const charges: { jobId: string; renderDurationMs: number; amount: number }[] = [];
+  let current = balance;
+  const chargedJobIds = new Set<string>();
+
+  function priceOf(durationMs: number): number {
+    const entry = pricing.entryFor('mix', MIXDOWN_ENGINE_ID);
+    if (entry === undefined) throw new Error('the mix price entry is missing from the rate card');
+    return costOf(entry, { durationMs, outputCount: 1 });
+  }
+
+  return {
+    charges,
+    balanceNow: () => current,
+    quote: (request) => ({
+      pricingKey: `${request.assetKind}:${request.engineId}`,
+      amount: priceOf(request.durationMs),
+      assetKind: request.assetKind,
+      engineId: request.engineId,
+      durationMs: request.durationMs,
+      outputCount: request.outputCount,
+    }),
+    usage: () => Promise.resolve({ balance: current }),
+    chargeMixdown: (request) => {
+      const amount = priceOf(request.renderDurationMs);
+      // Requirement 2.12 through `Credit_Service`'s idempotency by `jobId`.
+      if (chargedJobIds.has(request.jobId)) {
+        return Promise.resolve({
+          accountId: request.accountId,
+          jobId: request.jobId,
+          amount,
+          durationMs: request.renderDurationMs,
+          balanceAfter: current,
+          chargedAtMs: 1_000,
+          newlyCharged: false,
+        });
+      }
+      chargedJobIds.add(request.jobId);
+      current -= amount;
+      charges.push({ jobId: request.jobId, renderDurationMs: request.renderDurationMs, amount });
+      return Promise.resolve({
+        accountId: request.accountId,
+        jobId: request.jobId,
+        amount,
+        durationMs: request.renderDurationMs,
+        balanceAfter: current,
+        chargedAtMs: 1_000,
+        newlyCharged: true,
+      });
     },
   };
 }

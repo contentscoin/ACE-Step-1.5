@@ -1,9 +1,9 @@
 # MusicStudio 인수인계서 (Handoff)
 
-작성 시점: 태스크 **4.2 Mixdown_Renderer** 완료 직후 (4.1 시점 문서를 갱신).
+작성 시점: 태스크 **4.3 클립 이펙트 및 타임라인 통합 검증** 완료 직후 — Phase 4 종료 (4.2 시점 문서를 갱신).
 스펙: `.kiro/specs/ai-music-generation-service/` (requirements.md / design.md / tasks.md).
 
-이 문서는 다음 담당자가 코드베이스를 다시 조사하지 않고 4.2로 넘어갈 수 있도록 하는 데 목적이 있다.
+이 문서는 다음 담당자가 코드베이스를 다시 조사하지 않고 **5.1 Library_Service** 로 넘어갈 수 있도록 하는 데 목적이 있다.
 
 ---
 
@@ -15,10 +15,12 @@
 | 2 | 2.1–2.7 Core Generation (곡, BGM, SFX, 대사, V2A) | 완료 |
 | 3 | 3.1–3.4 Audio Processing (DSP, 이펙트, 마스터링, 사운드 팩) | 완료 |
 | 4 | 4.1 Timeline_Service | 완료 |
-| 4 | **4.2 Mixdown_Renderer** | **완료 (이번 작업)** |
-| 4 | 4.3 클립 이펙트 및 타임라인 통합 | 미착수 — **다음 작업** |
-| 5–9 | Library/재생/공유, 안전·라이선스, 프런트엔드, 관측성, 공개 API | 미착수 |
+| 4 | 4.2 Mixdown_Renderer | 완료 |
+| 4 | **4.3 클립 이펙트 및 타임라인 통합 검증** | **완료 (이번 작업) — Phase 4 종료** |
+| 5 | 5.1 Library_Service | 미착수 — **다음 작업** |
+| 5 | 5.2 Playback_Service, 5.3 Sharing_Service | 미착수 |
 | 6 | 6.1, 6.2 (안전·동의 일부) | 완료 |
+| 6–9 | 6.3 라이선스, 프런트엔드, 관측성, 공개 API, PBT 감사, E2E | 미착수 |
 
 ### 현재 테스트 기준선 (green)
 
@@ -27,18 +29,25 @@ cd musicstudio
 export PATH="$HOME/.nvm/versions/node/v22.23.1/bin:$PATH"   # npm 은 기본 PATH 에 없다
 npm run lint          # clean
 npm run typecheck     # 0 errors
-npm test              # 2726 passed | 20 skipped  (~47 s)
+npm test              # 2806 passed | 20 skipped  (~39 s)
 python3 dsp/scripts/check_import_boundary.py
-dsp/.venv/bin/python -m pytest dsp/test   # 410 passed | 5 skipped  (~54 s)
+dsp/.venv/bin/python -m pytest dsp/test   # 450 passed | 5 skipped  (~52 s)
 ```
 
-4.1 시점 기준선은 TypeScript 2666, Python 365 였다. 4.2 가 TypeScript +60, Python +45 를 더했다.
-(Python 총 시간이 38 s → 54 s 로 늘어난 것은 4.2 때문이 아니다. `--durations` 상위 8개는 전부
-태스크 3.2/3.3 의 것이고 4.2 의 테스트는 각 1 s 미만이다. 측정 머신 부하 차이로 보인다.)
+4.1 시점은 TypeScript 2666 / Python 365, 4.2 시점은 2726 / 410 이었다.
+4.3 이 TypeScript **+80**, Python **+40** 을 더했다.
+
+Property 13 에 `effect_processor` 를 넘기는 케이스 2개를 추가했고(각 100 examples × 3 렌더), 그
+경로는 `pedalboard` 를 실제로 통과한다. 측정해 보면 Python 전체 시간은 4.2 시점과 사실상 같다
+(둘 다 50 s 대). 느려졌다는 인상을 받으면 머신 편차를 먼저 의심할 것. examples 를 낮춰서 시간을
+벌지는 않는다 — design §10 의 최소 반복이 100 이다.
 
 - TypeScript 20 skip = `test/integration/db-schema.test.ts` (PostgreSQL 없음). **정상이며 그대로 둔다.**
 - Python 5 skip = `pydub`/`ffmpeg` 폴백 경로. **정상이며 그대로 둔다.**
 - 이 숫자를 줄이기 위해 테스트를 삭제하거나 `.skip` 하지 않는다.
+
+**단, 위 Python 숫자는 `libatomic.so.1` 이 로더 경로에 있는 호스트의 것이다.** 없으면 5 skip 이
+아니라 **53 skip** 이 된다(450 → 402 passed). 실패는 0 이다. 다음 항목을 반드시 읽을 것.
 
 ---
 
@@ -63,6 +72,31 @@ dsp/.venv/bin/python -m pytest dsp/test   # 410 passed | 5 skipped  (~54 s)
   parity 테스트로 한다.
 - `npm` 은 `$HOME/.nvm/versions/node/v22.23.1/bin` 에 있다.
 - Python 은 `dsp/.venv/bin/python` (3.11). 맨 `python3` 는 3.9 이고 import boundary 스크립트 실행에만 쓴다.
+
+### 3.1 `pedalboard` 와 `libatomic.so.1` — 이걸 모르면 스위트가 무너진 것처럼 보인다
+
+`pedalboard` 는 기본 의존성이지만 **네이티브 휠**이고 플랫폼의 `libatomic.so.1` 을 링크한다. 휠은
+그것을 번들하지 않는다(`dsp/pyproject.toml` 의 주석이 이 사실을 이미 적어 두었다). CI 의
+`ubuntu-latest` 에는 있으므로 CI 는 이펙트 경로를 실제로 실행한다. **이 샌드박스에는 없다** —
+`/usr/lib/gcc/x86_64-amazon-linux/11/libatomic.so.1.2.0` 파일은 있지만 `libatomic.so.1` 이라는
+이름의 심링크가 없어서 `dlopen` 이 찾지 못한다.
+
+이펙트 경로를 실제로 검증하려면(4.3 을 검증할 때 필요했다):
+
+```bash
+mkdir -p /tmp/atomiclib
+ln -sf /usr/lib/gcc/x86_64-amazon-linux/11/libatomic.so.1.2.0 /tmp/atomiclib/libatomic.so.1
+LD_LIBRARY_PATH=/tmp/atomiclib:$LD_LIBRARY_PATH dsp/.venv/bin/python -m pytest dsp/test
+```
+
+`/tmp` 는 도구 호출 사이에 유지되지 않으므로 **심링크 생성과 pytest 실행을 한 명령에 넣어야 한다.**
+
+그리고 규칙: **`pedalboard` 에 도달하는 테스트에는 `requires_pedalboard` 스킵 가드를 붙인다.**
+`effects.pedalboard_available()` 위에 만든 마커이며 `test_effects.py` 가 그 형태를 정했다. 가드가
+없으면 라이브러리 없는 호스트에서 "이유가 적힌 스킵" 대신 **하드 실패**가 나고, 스위트 전체가
+깨진 것처럼 보인다. 4.3 이 처음 작성될 때 새 테스트 23개에 이 가드가 빠져 정확히 그 일이
+일어났다. 가드는 **클래스 통째가 아니라 실제로 라이브러리를 쓰는 테스트에만** 붙인다 — 천장
+산술, 레지스트리 플래그, 프로세서 없는 체인의 거절, 체인 검증은 모든 호스트에서 계속 돌아야 한다.
 
 ---
 
@@ -105,7 +139,7 @@ dsp/.venv/bin/python -m pytest dsp/test   # 410 passed | 5 skipped  (~54 s)
 ### 4.3 마이그레이션
 
 - 파일명 `NNNN_snake_case.sql`, **번호에 빈칸이 없어야 한다**(`db/runner.ts` 가 검사).
-- `0001`–`0015` 사용 중. **다음 빈 번호는 `0016`.**
+- `0001`–`0016` 사용 중. **다음 빈 번호는 `0017`.** (`0016` = 4.3 의 `timeline_clip.effect_chain`.)
 - parity 테스트는 **존재 + 유일성 + gap-free** 로 검증한다. **"최신 마이그레이션은 NNNN 이다" 같은 단정은 쓰지 않는다** —
   태스크 3.2 가 정확히 그 취약함을 제거했다. 모든 후속 태스크에서 무관한 이유로 깨지고, 사람이 테스트를 읽는 대신
   고치도록 훈련시킨다.
@@ -130,6 +164,11 @@ dsp/.venv/bin/python -m pytest dsp/test   # 410 passed | 5 skipped  (~54 s)
 - **속성이 어느 하네스에 사는가는 그 속성이 무엇에 대한 것인지로 정한다.** 샘플에 대한 진술은 Python
   (`hypothesis`), 파서·계획·상태 전이에 대한 진술은 TypeScript(`fast-check`). 지금까지: 1–11·16–23 은
   TypeScript, **12·13**(믹스다운, `dsp/test/test_mixdown.py`) · 14·24(이펙트) · 15(마스터링)는 Python.
+- **기존 Property 를 확장하는 것이 새 번호를 만드는 것보다 항상 낫다.** 4.3 은 "클립 이펙트 포함
+  재현성"을 Property 13 의 케이스로 추가했다(§6.3.2 항목 10). 소유 태스크가 없는 속성을 새로 번호
+  매기면 §9.2 의 감사가 오집계한다.
+- **필드를 추가했으면 그 필드를 비교하는지 변이 테스트로 확인할 것.** 왕복 속성은 조용히 약해진다.
+  4.3 의 확인 결과는 §6.3.3 에 표로 있다.
 
 ### 4.5 오류 계약
 
@@ -199,12 +238,12 @@ CHECK 로 표현 못 하는 셋(클립 상한 500, 겹침 금지, 원본 길이 
 | `test/property/timeline-mixdown-plan.test.ts` | 계획 계층 속성. **전부 unnumbered** (Property 12/13 은 Python 에 있다) |
 | `test/support/timeline-harness.ts` | `stubMixdownRenderPort()`, `recordingMixAssetStore()`, `mixProvenance()` 추가 |
 
-**마이그레이션을 추가하지 않았다.** `0015` 헤더가 이미 "믹스다운 컬럼은 두지 않는다 — 자산은 0003,
-계보는 0005" 라고 못박았고, 자산 메타데이터 테이블은 Library_Service(5.1) 것이다(0012 헤더의
+**4.2 는 마이그레이션을 추가하지 않았다.** `0015` 헤더가 이미 "믹스다운 컬럼은 두지 않는다 — 자산은
+0003, 계보는 0005" 라고 못박았고, 자산 메타데이터 테이블은 Library_Service(5.1) 것이다(0012 헤더의
 `DialogueRenditionStorePort` 와 같은 상태). 그래서 28.28 의 감쇠량은 `MixdownAssetStore` 를 통해
-간다. **다음 빈 마이그레이션 번호는 여전히 `0016`.**
+간다. **이 상태는 그대로이며 5.1 이 정리할 일이다 — §6.4 참고.**
 
-### 6.2 4.2 가 내린 결정 중 4.3 이 알아야 할 것
+### 6.2 4.2 가 내린 결정 (여전히 유효)
 
 1. **렌더링 대상은 `renderTargetSet()` 을 그대로 소비한다.** 정렬(클립 ID 오름차순)만 4.2 가 한다.
    워커도 도착 후 다시 정렬한다 — 순서는 Property 12/13 의 전제이고, 어느 한쪽이 혼자 잃을 수 있으면 안 된다.
@@ -213,44 +252,149 @@ CHECK 로 표현 못 하는 셋(클립 상한 500, 겹침 금지, 원본 길이 
    Req 28.7 이 같은 트랙 클립 겹침을 금지하므로 per-clip 적용은 per-track 버스와 **정확히 같은**
    부동소수점 연산이다. 32개 버스를 만들면 5분 스테레오에서 7 GB 다.
 3. **팬 법칙은 balance 법칙**: `left = min(1, 1−pan)`, `right = min(1, 1+pan)`. `pan = 0` 이 정확히 1.0
-   이어야 해서다(등파워 법칙은 기본값에서 모든 믹스를 3 dB 줄이고 정규화 발동 조건을 바꾼다).
-   모노 렌더에서는 팬을 적용하지 않는다. Req 28.18 이 범위만 정하므로 **열린 질문**(§7 결함 10).
-4. **정규화는 단일 광대역 게인.** 리미터가 아니다 — 태스크 3.3 이 Req 30.8 멱등성에서 남긴 논거가
-   그대로 적용된다(스케일 등변성이 없으면 재현성이 깨진다).
-5. **BLAS 스레드**: 태스크 3.1/3.2/3.3 의 결론을 되풀이하지 않았다. Python 에서 못 박을 수 없고,
-   `mixdown.py` 의 배열 연산은 전부 elementwise(`+=`, 슬라이스, 스칼라 곱)이며 `dot`/`@`/`einsum`/
-   축 `sum` 이 하나도 없다. 그래서 Property 13 은 스레드 수에 **무관하게** 성립한다. 컨테이너에
-   `OMP_NUM_THREADS=1` 을 두는 것은 여전히 design §11.3 의 몫이다.
-6. **누산기는 float64, 출력은 float32** (design §6.1 그대로). 이 덕분에 재결합 오차가 float32 마지막
-   비트에 도달하지 못한다 — 즉 "샘플 비트 동일" 테스트만으로는 정렬이 사라진 구현을 잡지 못한다.
-   그래서 `rendered_clip_ids` / `renderedClipIds` 를 결과에 실어 **순서 자체를 단정**한다.
-7. **클립 이펙트 슬롯은 배선만 했다.** `MixdownClip.effect_chain` 과 `effect_processor` 인자가 있고,
-   체인이 있는데 프로세서가 없으면 `mixdown_clip_effects_unsupported` 로 **거절**한다(조용히 버리면
-   완성된 것처럼 보이는데 사용자 편집이 빠진 믹스가 나온다). `TimelineClip` 에는 아직 체인 필드가 없다.
+   이어야 해서다. 모노 렌더에서는 팬을 적용하지 않는다. Req 28.18 이 범위만 정하므로 **열린 질문**(§7 결함 10).
+4. **정규화는 단일 광대역 게인.** 리미터가 아니다 — 스케일 등변성이 없으면 재현성이 깨진다.
+5. **BLAS 스레드**: Python 에서 못 박을 수 없다. `mixdown.py` 의 배열 연산은 전부 elementwise 이므로
+   Property 13 은 스레드 수에 **무관하게** 성립한다. 컨테이너의 `OMP_NUM_THREADS=1` 은 design §11.3 의 몫.
+6. **누산기는 float64, 출력은 float32.** 그래서 "샘플 비트 동일" 만으로는 정렬이 사라진 구현을 잡지
+   못하고, `rendered_clip_ids` / `renderedClipIds` 로 **순서 자체를 단정**한다.
+7. **클립 이펙트 슬롯은 배선만 했다** — 이 항목은 4.3 이 채웠다. 아래 §6.3 참고.
 
 ---
 
-## 6.3 다음 작업: 4.3 클립 이펙트 및 타임라인 통합 검증
+## 6.3 4.3 이 남긴 것 (Req 29.31, 29.32, 2.12)
 
-`_Requirements: 29.31–29.32, 2.12_`, `_설계: §6.3_`. **조항 소유는 배타적이다** — 28.24–28.29 는 4.2 가
-구현했다. 다시 구현하지 않는다.
+소유 조항은 **29.31, 29.32, 2.12 뿐이다.** 29.1–29.30·29.33–29.35 는 3.2, 28.1–28.23·28.30–28.39 는
+4.1, 28.24–28.29 는 4.2 것이고 어느 것도 다시 구현하지 않았다.
 
-시작점:
+### 6.3.1 파일
 
-1. **`TimelineClip` 에 `Effect_Chain` 필드를 추가**해야 한다. 지금은 없다. 추가하면
-   `TIMELINE_CLIP_FIELDS`, `project-printer.ts`, `project-parser.ts`, `equivalence.ts`(체인 동등 관계는
-   `domain/effects/equivalence.ts` 에 이미 있다), `0015` 스키마 + `schema-parity.test.ts` 가 모두 따라온다.
-   Req 28.32 의 왕복 속성(Property 6)이 새 필드를 비교하는지 확인해야 한다.
-2. **테일 정책이 4.3 의 핵심이다.** design §6.3 + Req 29.32: 믹스 안에서는 **클립 재생 길이로 잘라냄**,
-   테일 보존은 독립 Generation_Version 저장 시에만(최대 +10000 ms). 잘라냄 자체는 4.2 가 이미 한다
-   (`_clip_signal` 4단계) — 4.3 은 `effect_processor` 를 실제로 공급하면 된다.
-   `dsp/src/musicstudio_dsp/effects.py` 의 `apply_chain()` 이 그 프로세서다(패딩·상한 처리 포함).
-3. **크레딧 차감(Req 2.12)** 은 4.3 것이다. `renderProject()` 가 `metadata.durationMs` 를 돌려주므로
-   단가 × 렌더링 길이의 곱셈 인자는 이미 있다. `services/credit/` 을 쓴다.
-4. **재현성 3회 확인**은 이미 있는 Property 13 을 재작성하지 말고 **이펙트 포함 케이스로 확장**한다
-   (`dsp/test/test_mixdown.py` 의 `TestProperty13...` 에 `effect_processor` 를 넘기는 예제 추가).
-   Property 14(이펙트 재현성)는 태스크 3.2 것이므로 새 번호를 만들지 않는다.
-5. 소유 Property: **없다.** §9.2 표에 4.3 항목이 없다. 새로 쓰는 것은 전부 "unnumbered" 라고 적는다.
+| 파일 | 내용 |
+|---|---|
+| `domain/timeline/clip-effects.ts` | **신규.** Req 29.31 의 단계 순서(`CLIP_EFFECT_STAGES`)와 Req 29.32 의 두 천장(`tailCeilingMs`), 믹스다운 정합성 검사(`clipEffectConsistency`), `clipsWithEffectChains` |
+| `domain/timeline/project.ts` | `TimelineClip.effectChain: EffectChain \| null` 추가 + `TIMELINE_CLIP_FIELDS` + `clip_effect_chain_invalid` 검증 |
+| `domain/timeline/project-printer.ts` | 문서에 `effectChain` (`chainToDocument` 경유, `null` 명시) |
+| `domain/timeline/project-parser.ts` | `asChain()` — 없거나 `null` 이면 체인 없음, 잘못된 체인은 `clipViolations` 가 클립 인덱스와 함께 보고 |
+| `domain/timeline/equivalence.ts` | `effectChain` 을 **Req 29.26 의 체인 동등 관계로** 비교 (`!==` 는 참조 비교라 틀린다) |
+| `domain/timeline/commands.ts` | `AddClipRequest.effectChain`. 분할/복제는 스프레드로 상속 |
+| `domain/timeline/mixdown.ts` | `MixdownPlan.effectChainClipIds`, `MixAssetMetadata.effectChainClipIds` |
+| `services/timeline/credit-ports.ts` | **신규.** `MixdownCreditPort` — `Credit_Service` 의 좁은 뷰 3개 메서드 |
+| `services/timeline/mixdown-renderer.ts` | 체인 전달, 정합성 검증, Req 2.12 크레딧 차감, `quoteProject()` |
+| `services/timeline/mixdown-ports.ts` | `MixdownClipRequest.effectChain`(문서 형태), `MixdownRenderResult.clipEffectsApplied` |
+| `dsp/src/musicstudio_dsp/clip_effects.py` | **신규.** `clip_effect_processor()` + 두 천장. `effects.apply_chain` 위의 배선일 뿐 |
+| `dsp/src/musicstudio_dsp/mixdown.py` | `effect_processor` 를 실제로 호출, `MixdownResult.clip_effects_applied` 추가 |
+| `dsp/src/musicstudio_dsp/worker.py` | `effect_chain` 파싱 + `effect_processor` **무조건** 주입 |
+| `db/migrations/0016_timeline_clip_effect_chain.sql` | **신규.** `timeline_clip.effect_chain jsonb` + 1–16개 CHECK + 부분 인덱스 |
+| `dsp/test/test_clip_effects.py` | **신규.** 테일 절단, 다음 클립 침범 없음, 프로세서 없는 체인 거절 |
+| `dsp/test/test_mixdown.py` | **Property 13 에 `effect_processor` 케이스 2개 추가** (새 번호 아님) + 체인 생성기 |
+| `dsp/test/test_worker.py` | 태스크 셸의 클립 이펙트 7건 (`effect_chain` 전달, 테일 절단, 3회 재현성) |
+| `test/unit/timeline/clip-effects.test.ts` | **신규.** 두 천장, 정합성, 그리고 **Property 6 이 새 필드를 정말 비교하는지** |
+| `test/support/timeline-harness.ts` | `validProject` 가 체인을 실제로 생성 (§6.3.3), `fakeMixdownCredit()` |
+
+### 6.3.2 4.3 이 내린 결정 중 5.1 이후가 알아야 할 것
+
+1. **`Effect_Chain` 필드는 `EffectChain | null` 이다. optional (`?`) 이 아니다.**
+   `JSON.stringify` 는 `undefined` 값을 **생략**하므로, optional 이면 같은 상태의 클립이 두 가지
+   문서로 인쇄될 수 있고 Req 28.33 의 바이트 동일이 경로에 의존하게 된다. `clipViolations` 는
+   `undefined` 를 명시적으로 거절한다.
+2. **빈 배열은 "체인 없음"이 아니다.** Req 29.13 의 하한이 1 이므로 `{items: []}` 는 거절된다.
+   "체인 없음"의 표현은 `null` **하나뿐**이다 — 두 개면 Req 28.33 이 무너진다. 0016 의 CHECK 도 같다.
+3. **테일 천장 10000 ms 는 새 숫자가 아니다.** 3.2 가 `domain/effects/registry.ts` 의
+   `EFFECT_TAIL_ALLOWANCE_MS` 로 이미 선언했고(`effect_registry.json` 에 미러 + parity 테스트),
+   4.3 은 **re-export 만** 한다. 분류는 **bound** 다(threshold 아님): 그 수를 바꾸면 이미 저장된 모든
+   `Generation_Version` 의 허용 길이가 소급해서 바뀐다(Req 34.10 이 금지). 따라서
+   `QUALITY_THRESHOLD_NAMES` 는 **손대지 않았고** `test/unit/bgm/threshold-set.test.ts` 도 그대로다.
+4. **잘라냄은 프로세서가 아니라 `mixdown.py` 4단계가 한다.** 프로세서는 테일을 포함해 그대로 돌려준다.
+   이유: 4단계는 체인이 없는 클립에도 돌고, Req 28.25 의 길이 산술이 그 단계에 의존한다. 두 곳에서
+   자르면 Req 28.13 의 산술이 두 벌이 된다.
+5. **`clip_effects_applied` 는 관측값이다.** `_clip_signal` 이 체인을 적용한 분기 *안에서* 플래그를
+   돌려주며, 호출자가 `clip.effect_chain` 을 다시 보고 만들지 않는다. 체인을 흘린 렌더는 길이·형태·
+   피크가 모두 그럴듯하므로 **보고된 집합만이 유일한 증거**다. `clipEffectConsistency` 가 양방향으로
+   대조하고 불일치면 500 으로 거절한다(저장하지 않는다).
+6. **함정: 믹스 버퍼 경계가 클립 절단 누락을 가린다.** `total_frames` 는 `start + play_length` 로
+   계산되고 배치 시 `width = min(...)` 로 잘리므로, 맨 끝 클립 하나만 있으면 4단계를 지워도 믹스
+   길이는 그대로다. 실제로 이걸 잡는 테스트는 `test_the_tail_does_not_bleed_over_the_next_clip`
+   (뒤 클립 구간 침범)과 `test_the_tail_is_cut_before_the_fade_out`(마지막 샘플이 0) 두 개다.
+   변이 테스트로 확인했다. 길이만 보는 테스트를 추가해도 이 회귀는 잡히지 않는다.
+7. **크레딧은 렌더 *후에* 차감하고, 잔액은 렌더 *전에* 본다.**
+   - 차감 길이는 `plan.lengthMs`(Req 28.25 가 정의한 렌더링 길이)이며 `result.durationMs` 가 아니다.
+     후자는 프레임 반올림으로 최대 1프레임(48 kHz 에서 0.021 ms) 어긋나므로, 그걸로 값을 매기면
+     같은 프로젝트의 두 렌더 가격이 부동소수점에 의존한다. 미리 보여준 견적과 실제 청구액도 같아진다.
+   - 순서가 이렇게 된 유일한 이유는 **환급 경로를 새로 만들지 않기 위해서**다. 존재하지 않는 믹스에
+     대해 청구된 적이 없으므로 되돌릴 것이 없다. 이 시스템의 환급 경로는 여전히
+     `services/sound/job-quality-rejection.ts` **하나뿐**이다. 여기에 두 번째를 만들지 말 것.
+   - Req 2.3 의 402 는 렌더 전에 `quote` + `usage` 로 낸다. 402 생성자는 `services/credit/errors.ts`
+     의 것을 **import** 한다(같은 코드·같은 상태를 두 번 정의하지 않기 위해).
+   - `credit` 은 **optional** 이고, 없으면 `outcome.charge === null` 이다. 조용한 0 이 아니라 `null`
+     이므로 `Credit_Service` 배선을 잊은 컴포지션 루트가 결과에 드러난다.
+8. **Req 2.12 를 위해 새로 만든 것은 없다.** `chargeMixdown`, `mix:musicstudio-mixdown` 단가 항목,
+   `costOf` 는 전부 이미 있었다. 4.3 은 길이와 시점만 정했다.
+9. **클립의 체인을 *바꾸는* 편집 명령은 없다.** Req 28.23 이 12개를 열거하고 design §6.4 의
+   `EditCommandType` 이 그것을 미러하므로 13번째를 만들면 4.1 의 수용 기준이 거짓이 된다. 체인은
+   `planAddClip` 또는 프로젝트 문서 가져오기로만 붙는다. **열린 질문**(§7 결함 16).
+10. **소유 Property 는 없다.** §9.2 표에 4.3 행이 없다. 재현성 증거는 **Property 13 을 확장**해서
+    만들었다(`dsp/test/test_mixdown.py` 의 `test_three_renders_with_clip_effects_are_sample_identical`
+    과 `test_a_fresh_processor_per_render_gives_the_same_result`). 새 번호를 만들지 않았고, 나머지
+    새 속성은 전부 `unnumbered` 라고 명시했다(`test/property/timeline-mixdown-plan.test.ts`).
+11. **`pedalboard` 를 쓰는 새 테스트에는 모두 `requires_pedalboard` 가드가 붙어 있다**
+    (`test_clip_effects.py`, `test_mixdown.py` 의 Property 13 확장 2건, `test_worker.py` 의 클립
+    이펙트 4건). 이유와 붙이는 범위는 §3.1 에 있다. Property 13 의 **드라이 케이스는 가드가 없으므로
+    속성 자체가 통째로 스킵되는 일은 없다** — 라이브러리가 없는 호스트에서도 28.27 은 계속 검증된다.
+
+### 6.3.3 Property 6/7 이 새 필드를 정말 비교하는가 — 변이 테스트로 확인함
+
+필드를 추가하면 왕복 속성이 **조용히 약해질** 수 있으므로 직접 확인했다.
+
+| 변이 | Property 6 | Property 7 | 키 순서 속성(unnumbered) |
+|---|---|---|---|
+| 프린터가 체인을 버린다 (`effectChain: null`) | **실패** ✓ | 통과 | 통과 |
+| 프린터가 `chainToDocument` 대신 스프레드 (`[...items]`) | 통과 | 통과 | **실패** ✓ |
+
+- Property 6 은 체인 유실을 잡는다. `equivalence.ts` 가 `effectChain` 을 **체인 동등 관계**로 비교하기
+  때문이다. `!==` 로 두면(객체 참조 비교) 파싱된 클립이 원본과 절대 같지 않아 **모든** 체인 포함
+  프로젝트에서 실패하고, 반대로 필드를 건너뛰면 유실을 통과시킨다. 둘 다 테스트로 못박아 두었다
+  (`clip-effects.test.ts` 의 마지막 describe).
+- Property 7 은 두 변이 모두 못 잡는다 — 이는 **정상**이다. 7 은 재인쇄 안정성(바이트 동일)에 대한
+  진술이고 원본 충실도에 대한 진술이 아니다. 그래서 키 순서 속성이 따로 있고, 4.3 은 그 속성의
+  섞인 클립 객체에 **체인과 각 항목의 파라미터 키까지 역순으로** 넣어 강화했다.
+
+---
+
+## 6.4 다음 작업: 5.1 Library_Service
+
+`_Requirements: 11.1–11.13, 13.1–13.2, 13.4–13.9_`, `_설계: §4.1_`.
+**조항 소유는 배타적이다** — 위 조항만 구현한다.
+
+### 5.1 이 반드시 알아야 할 것: 두 태스크가 5.1 을 기다리고 있다
+
+**자산 메타데이터 저장 테이블이 아직 없고, 그것은 5.1 의 것이다.** 지금까지 두 곳이 임시로
+포트 뒤에서 기다린다:
+
+| 기다리는 것 | 어디에 | 무엇 때문에 |
+|---|---|---|
+| `MixdownAssetStore` (`services/timeline/mixdown-ports.ts`) | 4.2 + 4.3 | Req 28.28 의 감쇠량, Req 29.31 의 `effectChainClipIds` 등 `MixAssetMetadata` 11개 필드 |
+| `DialogueRenditionStorePort` | 2.7 | 대사 행 타이밍 (`db/migrations/0012` 헤더 참고) |
+
+`db/migrations/0015` 헤더가 "믹스다운 컬럼은 두지 않는다 — 자산은 0003, 계보는 0005" 라고 못박았고
+`domain/timeline/mixdown.ts` 의 `MixAssetMetadata` 주석도 같은 말을 한다. **5.1 이 자산 메타데이터
+테이블을 만들 때 이 두 포트의 구현을 함께 두는 것이 자연스럽다.** 만들지 않기로 한다면 두 헤더 주석을
+갱신해 다음 담당자가 다시 기다리지 않게 할 것.
+
+`MIX_METADATA_FIELDS` / `BGM_METADATA_FIELDS` 처럼 필드 목록을 상수로 두는 관례를 따르면
+"타입에 필드를 추가하고 writer 에서 빠뜨리는" 사고가 타입 오류가 된다.
+
+### 그 밖의 시작점
+
+- **다음 빈 마이그레이션 번호는 `0017`.** 4.3 이 `0016` 을 썼다. parity 테스트는 존재 + 유일성 +
+  gap-free 로만 검증한다(§4.3).
+- `mix` 는 이미 `Asset_Kind` 6종 중 하나이고 단가표에도 있다(`services/credit/pricing-table.ts`).
+  라이브러리 조회·다운로드가 `mix` 자산을 다루게 될 때 4.2/4.3 이 만든 자산이 그 대상이다.
+- Req 13.x 의 다운로드 포맷 변환은 `dsp/src/musicstudio_dsp/pipeline.py` 의 `convert_for_download`
+  와 워커의 `musicstudio_dsp.convert_for_download` 태스크가 이미 있다. 새로 만들지 말 것.
+- 소프트 삭제(Req 11.x)는 `audio_asset.is_deleted` (0003) 이고, Req 28.36 의
+  `timeline_clip_availability` 뷰가 이미 그것을 읽는다 — 타임라인은 삭제된 자산을 참조하는 프로젝트를
+  **읽을 수 있어야** 하므로(28.36), 영구 삭제 경로를 만들 때 `timeline_clip.asset_id` 의
+  `ON DELETE RESTRICT` 를 확인할 것.
 
 ---
 
@@ -304,6 +448,38 @@ CHECK 로 표현 못 하는 셋(클립 상한 500, 겹침 금지, 원본 길이 
 15. **Req 33.20 의 상업적 사용 접기는 4.2 가 하지 않는다.** Property 18 / 태스크 6.3 것이므로,
     provenance 와 접힌 플래그는 요청과 함께 들어온다. `validateAudioAsset` 이 국소적으로 확인 가능한
     규칙(자기 provenance 가 허용하지 않는 상업적 사용을 주장할 수 없음)만 강제한다.
+
+---
+
+### 4.3 이 발견한 것
+
+16. **클립의 `Effect_Chain` 을 바꾸는 편집 조작이 없다.** Req 29.31 은 "Timeline_Clip에 Effect_Chain이
+    지정된 경우" 를 전제하지만, 어떻게 지정되는지에 대한 조항이 Req 28 에도 Req 29 에도 없다.
+    Req 28.23 의 12개 목록에는 없고, Req 29.14 는 `Audio_Asset` 의 `Generation_Version` 에 대한 것이라
+    클립에는 적용되지 않는다.
+    → `planAddClip` 의 선택적 필드와 프로젝트 문서 가져오기로만 붙게 했다. 13번째 편집 조작을 만들면
+      Req 28.23 과 4.1 의 수용 기준("12개 편집 조작")이 거짓이 되므로 만들지 않았다. **확정이 필요하다** —
+      UI 태스크 7.x 에서 "클립에 이펙트 걸기" 를 하려면 조항이 있어야 한다.
+17. **Req 29.32 의 주체가 `Effects_Service` 인데 tasks.md 는 이 조항을 4.3 에 할당한다.**
+    조항 본문은 `Generation_Version` 의 길이 불변식이고 그것은 3.2 가 이미 `lengthViolationFor` 로
+    구현했다. 4.3 이 실제로 채운 것은 design §6.3 의 나머지 절반, 즉 "믹스다운 안에서는 보존하지
+    않는다" 는 쪽이다.
+    → 3.2 의 구현을 재사용하고 믹스다운 측 정책만 새로 썼다. 조항 문면과 태스크 배정이 어긋나 있으므로
+      스펙 소유자의 확인이 있으면 좋다.
+18. **Req 2.12 가 "렌더링 길이" 를 정의하지 않는다.** 계획된 길이(Req 28.25)와 산출된 길이는 최대
+    1프레임 다르다.
+    → Req 28.25 가 정의한 값(`plan.lengthMs`)으로 값을 매겼다. 근거는 §6.3.2 항목 7. **확정이 필요하다.**
+19. **Req 2.12 에 실패 시 환급 조항이 없다.** Req 2.4 는 `Generation_Job` 실패에 대한 것이고 믹스다운
+    내보내기는 `Generation_Job` 이 아니다.
+    → 검증된 믹스가 저장된 *뒤에* 차감하도록 순서를 정해 환급이 필요한 상태를 만들지 않았다. 믹스다운을
+      `Generation_Job` 으로 모델링하기로 한다면(9.1 의 비동기 API 가 그럴 수 있다) 그때는 기존 수명주기의
+      `engine_failed` 전이를 쓸 것이고, 새 환급 경로는 그때도 만들지 않는다.
+20. **분할 시 체인 처리 규칙이 없다** (Req 28.14 는 길이 합만 규정).
+    → 양쪽 절반이 원본의 체인을 상속한다. 결과적으로 두 절반이 독립적으로 처리되므로 절단면을 넘던
+      딜레이 테일은 더 이상 넘지 않는다. 이는 Req 29.31 의 per-clip 처리에서 따라오는 결과이고 모든
+      클립 경계에서 이미 일어나는 일과 같다. **확정이 필요하다.**
+21. **Req 19.6(직접 입력 자산 64개)이 이펙트 체인을 세지 않는다.** 클립 이펙트는 새 자산을 참조하지
+    않으므로 계보에 영향이 없다 — 확인만 해 둔다. 문제 없음.
 
 ---
 

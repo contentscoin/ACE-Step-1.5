@@ -12,6 +12,8 @@ import type { MixdownRenderResult } from '../../../services/timeline/mixdown-por
 import { createMutableClock } from '../../support/mutable-clock';
 import {
   clip,
+  effectChain,
+  fakeMixdownCredit,
   inMemoryTimelineStore,
   mixProvenance,
   projectWith,
@@ -41,6 +43,7 @@ const PROJECT = 'project-0';
 function renderer(
   project: TimelineProject | null,
   overrides: Partial<MixdownRenderResult> = {},
+  options: { readonly credit?: ReturnType<typeof fakeMixdownCredit> } = {},
 ) {
   const store = inMemoryTimelineStore();
   if (project !== null) void store.insert(recordOf(project));
@@ -53,10 +56,12 @@ function renderer(
     store,
     render,
     mixAssets,
+    credit: options.credit,
     service: createMixdownRenderer({
       store,
       render: render.port,
       mixAssets,
+      ...(options.credit === undefined ? {} : { credit: options.credit }),
       clock,
       generateId: () => `mix-${String(++counter)}`,
     }),
@@ -402,5 +407,268 @@ describe('planProject', () => {
   it('exposes Requirement 28.27s run count', () => {
     const { service } = renderer(projectWith(TWO_CLIPS));
     expect(service.reproducibilityRuns).toBe(3);
+  });
+});
+
+
+/* ------------------------------------------------ clip effects (Requirement 29.31) */
+
+const WET_CLIPS: readonly TimelineClip[] = [
+  clip({
+    id: 'clip-a',
+    assetId: 'asset-1',
+    track: 0,
+    startTimeMs: 0,
+    sourceDurationMs: 1_000,
+    effectChain: effectChain(['reverb']),
+  }),
+  clip({ id: 'clip-b', assetId: 'asset-2', track: 1, startTimeMs: 2_000, sourceDurationMs: 1_000 }),
+];
+
+describe('clip effects cross the seam (Requirement 29.31)', () => {
+  it('sends each clip\'s chain as the JSON document form', async () => {
+    const { service, render } = renderer(projectWith(WET_CLIPS));
+
+    await service.renderProject(request());
+
+    const sent = render.requests[0]?.clips ?? [];
+    // Requirement 29.11's array, not the domain wrapper: the worker validates the same bytes
+    // `Chain_Parser` would accept.
+    expect(sent[0]?.effectChain).toEqual([
+      { kind: 'reverb', parameters: expect.any(Object) as Record<string, number> },
+    ]);
+    // A clip with no chain sends `null`, never `undefined` and never an empty array.
+    expect(sent[1]?.effectChain).toBeNull();
+  });
+
+  it('sends parameters in registry order, so the worker sees canonical bytes', async () => {
+    const { service, render } = renderer(projectWith(WET_CLIPS));
+
+    await service.renderProject(request());
+
+    const item = (render.requests[0]?.clips[0]?.effectChain ?? [])[0];
+    expect(Object.keys(item?.parameters ?? {})).toEqual([
+      'room_size',
+      'damping',
+      'wet_level',
+      'dry_level',
+      'width',
+    ]);
+  });
+
+  it('records the processed clips on the mix asset\'s metadata', async () => {
+    const { service, mixAssets } = renderer(projectWith(WET_CLIPS));
+
+    const outcome = await service.renderProject(request());
+
+    expect(outcome.metadata.effectChainClipIds).toEqual(['clip-a']);
+    expect(mixAssets.saved[0]?.metadata.effectChainClipIds).toEqual(['clip-a']);
+  });
+
+  it('records an empty list for a project whose clips carry no chains', async () => {
+    const { service } = renderer(projectWith(TWO_CLIPS));
+    const outcome = await service.renderProject(request());
+    expect(outcome.metadata.effectChainClipIds).toEqual([]);
+  });
+
+  it('refuses to store a mix whose chains were dropped by the worker', async () => {
+    // The failure this exists for is invisible in the audio: right length, right shape,
+    // plausible peak, and none of the user's effects. Only the reported set reveals it.
+    const { service, mixAssets } = renderer(projectWith(WET_CLIPS), { clipEffectsApplied: [] });
+
+    await expect(service.renderProject(request())).rejects.toMatchObject({
+      statusCode: 500,
+      code: 'mixdown_render_invariant_breached',
+    });
+    expect(mixAssets.saved).toHaveLength(0);
+  });
+
+  it('names the clip whose chain went missing', async () => {
+    const { service } = renderer(projectWith(WET_CLIPS), { clipEffectsApplied: [] });
+
+    const error: unknown = await service.renderProject(request()).catch((cause: unknown) => cause);
+    expect(isGenerationError(error)).toBe(true);
+    if (isGenerationError(error)) {
+      expect(error.details).toMatchObject({
+        breach: 'clip_effects_not_applied',
+        clipIds: ['clip-a'],
+      });
+    }
+  });
+
+  it('refuses a mix where a chain was applied to a clip that carries none', async () => {
+    const { service } = renderer(projectWith(WET_CLIPS), {
+      clipEffectsApplied: ['clip-a', 'clip-b'],
+    });
+
+    const error: unknown = await service.renderProject(request()).catch((cause: unknown) => cause);
+    expect(isGenerationError(error)).toBe(true);
+    if (isGenerationError(error)) {
+      expect(error.details).toMatchObject({
+        breach: 'clip_effects_applied_unexpectedly',
+        clipIds: ['clip-b'],
+      });
+    }
+  });
+
+  it('does not send the chain of an excluded clip', async () => {
+    // Requirement 28.20: a muted clip contributes no samples, so it contributes no effects. The
+    // chain must not reach the worker at all, or the consistency check would demand it be applied
+    // to a clip that is not in the mix.
+    const project = projectWith([
+      { ...(WET_CLIPS[0] as TimelineClip), muted: true },
+      WET_CLIPS[1] as TimelineClip,
+    ]);
+    const { service, render } = renderer(project);
+
+    const outcome = await service.renderProject(request());
+
+    expect(render.requests[0]?.clips.map((c) => c.clipId)).toEqual(['clip-b']);
+    expect(outcome.metadata.effectChainClipIds).toEqual([]);
+  });
+});
+
+/* --------------------------------------- credit deduction (Requirement 2.12) */
+
+describe('credit deduction (Requirement 2.12)', () => {
+  it('charges the mixdown entry by the rendered length', async () => {
+    const credit = fakeMixdownCredit();
+    const { service } = renderer(projectWith(TWO_CLIPS), {}, { credit });
+
+    const outcome = await service.renderProject(request());
+
+    // The rate card: mix = 2 base + 1 per second. A 3 000 ms render is 2 + 3 = 5.
+    expect(outcome.charge).toMatchObject({ amount: 5, durationMs: 3_000, newlyCharged: true });
+    expect(credit.charges).toEqual([
+      { jobId: 'mix-2', renderDurationMs: 3_000, amount: 5 },
+    ]);
+  });
+
+  it('charges Requirement 28.25\'s computed length, not the produced duration', async () => {
+    // The worker's duration can differ from the plan's by a frame of rounding, and pricing on it
+    // would make the same project cost different amounts on two renders. See the module header.
+    const credit = fakeMixdownCredit();
+    const { service } = renderer(projectWith(TWO_CLIPS), { durationMs: 3_000.0208333 }, { credit });
+
+    const outcome = await service.renderProject(request());
+
+    expect(outcome.charge?.durationMs).toBe(3_000);
+  });
+
+  it('charges more for a longer mix', async () => {
+    const credit = fakeMixdownCredit();
+    const long = projectWith([
+      clip({ id: 'clip-a', assetId: 'asset-1', track: 0, startTimeMs: 0, sourceDurationMs: 60_000 }),
+    ]);
+    const { service } = renderer(long, {}, { credit });
+
+    const outcome = await service.renderProject(request());
+
+    expect(outcome.charge?.amount).toBe(62);
+  });
+
+  it('refuses before rendering when the balance cannot cover the mix (Requirement 2.3)', async () => {
+    const credit = fakeMixdownCredit(3);
+    const { service, render, mixAssets } = renderer(projectWith(TWO_CLIPS), {}, { credit });
+
+    await expect(service.renderProject(request())).rejects.toMatchObject({
+      statusCode: 402,
+      code: 'credit_balance_insufficient',
+    });
+    // Nothing was rendered, nothing was stored, nothing was charged.
+    expect(render.requests).toHaveLength(0);
+    expect(mixAssets.saved).toHaveLength(0);
+    expect(credit.charges).toHaveLength(0);
+    expect(credit.balanceNow()).toBe(3);
+  });
+
+  it('charges nothing when the render target set is empty (Requirement 28.29)', async () => {
+    const credit = fakeMixdownCredit();
+    const { service } = renderer(projectWith([]), {}, { credit });
+
+    await expect(service.renderProject(request())).rejects.toMatchObject({ statusCode: 409 });
+    expect(credit.charges).toHaveLength(0);
+  });
+
+  it('charges nothing when the render breached an invariant', async () => {
+    // The debit is last for exactly this reason: a mix that was not stored was not charged for,
+    // so no refund path is needed. This system has one refund path and it stays one.
+    const credit = fakeMixdownCredit();
+    const { service, mixAssets } = renderer(
+      projectWith(TWO_CLIPS),
+      { durationMs: 60_000 },
+      { credit },
+    );
+
+    await expect(service.renderProject(request())).rejects.toMatchObject({ statusCode: 500 });
+    expect(mixAssets.saved).toHaveLength(0);
+    expect(credit.charges).toHaveLength(0);
+    expect(credit.balanceNow()).toBe(1_000_000);
+  });
+
+  it('charges once for a retried export that reuses the charge key', async () => {
+    const credit = fakeMixdownCredit();
+    const { service } = renderer(projectWith(TWO_CLIPS), {}, { credit });
+
+    const first = await service.renderProject(request({ chargeJobId: 'export-1' }));
+    const second = await service.renderProject(request({ chargeJobId: 'export-1' }));
+
+    expect(first.charge?.newlyCharged).toBe(true);
+    expect(second.charge?.newlyCharged).toBe(false);
+    expect(credit.charges).toHaveLength(1);
+  });
+
+  it('charges the account rather than the owner when they differ', async () => {
+    const credit = fakeMixdownCredit();
+    const { service } = renderer(projectWith(TWO_CLIPS), {}, { credit });
+
+    const outcome = await service.renderProject(request({ accountId: 'account-9' }));
+
+    expect(outcome.charge?.accountId).toBe('account-9');
+  });
+
+  it('renders without charging when no Credit_Service is wired, and says so', async () => {
+    const { service } = renderer(projectWith(TWO_CLIPS));
+    const outcome = await service.renderProject(request());
+    // `null` rather than a silent zero, so a composition root that forgot to wire credits is
+    // visible in the outcome.
+    expect(outcome.charge).toBeNull();
+  });
+
+  it('quotes a project without rendering or charging it', async () => {
+    const credit = fakeMixdownCredit();
+    const { service, render } = renderer(projectWith(TWO_CLIPS), {}, { credit });
+
+    const quoted = await service.quoteProject(OWNER, PROJECT);
+
+    expect(quoted.quote).toMatchObject({
+      amount: 5,
+      durationMs: 3_000,
+      assetKind: 'mix',
+      engineId: MIXDOWN_RENDERER_ENGINE_ID,
+      outputCount: 1,
+    });
+    expect(render.requests).toHaveLength(0);
+    expect(credit.charges).toHaveLength(0);
+  });
+
+  it('quotes nothing for a project with nothing to render', async () => {
+    const credit = fakeMixdownCredit();
+    const { service } = renderer(projectWith([]), {}, { credit });
+
+    const quoted = await service.quoteProject(OWNER, PROJECT);
+
+    expect(quoted.plan.ok).toBe(false);
+    expect(quoted.quote).toBeNull();
+  });
+
+  it('quotes the same amount it later charges', async () => {
+    const credit = fakeMixdownCredit();
+    const { service } = renderer(projectWith(TWO_CLIPS), {}, { credit });
+
+    const quoted = await service.quoteProject(OWNER, PROJECT);
+    const outcome = await service.renderProject(request());
+
+    expect(outcome.charge?.amount).toBe(quoted.quote?.amount);
   });
 });

@@ -1,4 +1,5 @@
 export * from './bounds';
+export * from './clip-effects';
 export * from './commands';
 export * from './equivalence';
 export * from './history';

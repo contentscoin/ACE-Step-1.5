@@ -25,6 +25,22 @@
  * it rejects a document whose stored duration disagrees with the asset's (see
  * `project-parser.ts`), which is the drift the copy could otherwise hide.
  *
+ * ### A clip may carry an `Effect_Chain`, and it is `null` rather than absent
+ *
+ * Requirement 29.31 is a `WHERE` clause — "WHERE Timeline_Clip에 Effect_Chain이 지정된 경우" —
+ * so a chain is genuinely optional per clip. It is modelled as `EffectChain | null` rather than
+ * as an optional property, following `tempoBpm` and `timeSignature`: a required field with an
+ * explicit "unset" value cannot be forgotten by the printer, the parser or the equivalence
+ * relation, whereas an optional one is absent from `Object.keys` and so silently drops out of
+ * anything that iterates. Requirement 28.33's byte-identical reprint is the rule that makes the
+ * difference matter — `JSON.stringify` omits an `undefined`, so a chain that arrived as
+ * `undefined` on one path and `null` on another would print two different documents for the
+ * same clip.
+ *
+ * The chain *type* is `domain/effects/`'s. Requirement 29 defines it once and
+ * `chainViolations` already states every rule about it, so a clip validates its chain by
+ * delegating rather than by restating 29.9, 29.10 and 29.13 in timeline vocabulary.
+ *
  * ### Tracks are a positional array of exactly 32
  *
  * Requirement 28.4 fixes the range at 0–31 and Requirement 28.32 compares "각 트랙의" four
@@ -33,6 +49,8 @@
  * byte-identity free: there is no key order to inherit and no sparse-versus-default
  * ambiguity for the printer to resolve. A map keyed by track number would reintroduce both.
  */
+
+import { chainViolations, type EffectChain } from '../effects/chain';
 
 import {
   AUTO_PLACEMENT_GAP_MS,
@@ -81,6 +99,13 @@ export interface TimelineClip {
   readonly fadeInMs: number;
   readonly fadeOutMs: number;
   readonly muted: boolean;
+  /**
+   * Requirement 29.31's chain, or `null` for a clip with none.
+   *
+   * Applied by the `Mixdown_Renderer` to the *trimmed* clip audio and then cut to the clip's
+   * play length — see `clip-effects.ts` for the stage order and the tail policy.
+   */
+  readonly effectChain: EffectChain | null;
 }
 
 /**
@@ -102,6 +127,7 @@ export const TIMELINE_CLIP_FIELDS = [
   'fadeInMs',
   'fadeOutMs',
   'muted',
+  'effectChain',
 ] as const satisfies readonly (keyof TimelineClip)[];
 
 /** Requirement 28.18's per-track settings, plus 28.19/28.20's solo and mute states. */
@@ -160,6 +186,7 @@ export type TimelineViolationCode =
   | 'clip_gain_range'
   | 'clip_fade_range'
   | 'clip_mute_invalid'
+  | 'clip_effect_chain_invalid'
   | 'clip_overlap'
   | 'track_volume_range'
   | 'track_pan_range'
@@ -407,6 +434,35 @@ export function clipViolations(clip: TimelineClip): TimelineViolation[] {
       violation: 'clip_mute_invalid',
       expected: 'true or false',
       actual: String(clip.muted),
+    });
+  }
+
+  // Requirement 29.31's chain, when there is one. Delegated to `chainViolations` — Requirement
+  // 29 owns the effect vocabulary and its ranges, and restating them here would be a second
+  // declaration to keep in step. Only the *first* chain fault is carried up: a clip-level
+  // report naming sixteen effect parameters would drown the clip's own faults, and the caller
+  // that wants the full list has `chainViolations` itself.
+  if (clip.effectChain !== null && clip.effectChain !== undefined) {
+    const items: unknown = (clip.effectChain as { items?: unknown }).items;
+    const chainFaults = chainViolations(items);
+    if (chainFaults.length > 0) {
+      const first = chainFaults[0];
+      violations.push({
+        field: 'effectChain',
+        violation: 'clip_effect_chain_invalid',
+        expected: 'a valid Effect_Chain (Requirements 29.9, 29.10, 29.13)',
+        actual: `item ${String(first?.index ?? 0)}: ${first?.violation ?? 'unknown'}`,
+      });
+    }
+  } else if (clip.effectChain === undefined) {
+    // `null` means "no chain" and is the only admissible absence. `undefined` reaches here from
+    // a document that omitted the key *and* a parser that did not default it, and letting it
+    // through would make Requirement 28.33's reprint depend on which path built the clip.
+    violations.push({
+      field: 'effectChain',
+      violation: 'clip_effect_chain_invalid',
+      expected: 'an Effect_Chain or null',
+      actual: 'undefined',
     });
   }
 

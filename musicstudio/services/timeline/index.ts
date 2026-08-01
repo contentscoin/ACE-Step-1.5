@@ -1,3 +1,4 @@
+export * from './credit-ports';
 export * from './errors';
 export * from './mixdown-ports';
 export * from './mixdown-renderer';

@@ -46,6 +46,7 @@
  * function would let a parse fail for a reason the input never had.
  */
 
+import { toChain, type EffectChain } from '../effects/chain';
 import {
   parseFailure,
   parseSuccess,
@@ -260,7 +261,33 @@ function toClip(record: Record<string, unknown>): TimelineClip {
     fadeInMs: asNumber(record['fadeInMs']),
     fadeOutMs: asNumber(record['fadeOutMs']),
     muted: asBoolean(record['muted']),
+    effectChain: asChain(record['effectChain']),
   };
+}
+
+/**
+ * Requirement 29.31's chain from a document value, or `null`.
+ *
+ * An absent key and an explicit `null` both mean "this clip has no chain", which keeps a
+ * document written before clips could carry one readable — the same tolerance
+ * `description` gets above.
+ *
+ * A malformed chain is **not** rejected here. It is turned into an `EffectChain`-shaped value
+ * carrying the raw items so that `clipViolations` — which is where every other clip rule is
+ * stated — is the thing that reports it, with the clip's index attached. Parsing it here and
+ * returning early would report the fault without the index Requirement 28.34's siblings all
+ * carry, and would stop the parser reporting the *rest* of the document's faults, which is the
+ * one promise this parser makes that `Chain_Parser` does not.
+ */
+function asChain(value: unknown): EffectChain | null {
+  if (value === null || value === undefined) return null;
+  try {
+    // `toChain` normalises parameter order, which is what a reprint's byte-identity needs.
+    return toChain(value);
+  } catch {
+    // Invalid: carried through unnormalised for `clipViolations` to reject.
+    return { items: value as EffectChain['items'] };
+  }
 }
 
 function toTrack(record: Record<string, unknown>): TrackSettings {

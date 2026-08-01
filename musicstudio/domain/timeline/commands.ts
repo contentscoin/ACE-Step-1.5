@@ -50,6 +50,8 @@
  * payload available at the point of the request rather than after a partial mutation.
  */
 
+import type { EffectChain } from '../effects/chain';
+
 import {
   AUTO_PLACEMENT_GAP_MS,
   CLIP_PLAY_LENGTH_MIN_MS,
@@ -408,6 +410,16 @@ export interface AddClipRequest {
   readonly fadeInMs?: number;
   readonly fadeOutMs?: number;
   readonly muted?: boolean;
+  /**
+   * Requirement 29.31's chain, if the clip is added with one. Omitted means none.
+   *
+   * There is **no edit command for changing a clip's chain**, and that is deliberate:
+   * Requirement 28.23 enumerates exactly twelve operations and design §6.4's
+   * `EditCommandType` mirrors them, so a thirteenth would falsify task 4.1's acceptance
+   * criterion. A chain therefore reaches a clip either here or through an imported project
+   * document. Recorded as an open question — see the task 4.3 report.
+   */
+  readonly effectChain?: EffectChain | null;
 }
 
 /** Requirements 28.2, 28.5, 28.6, 28.7, 28.8. */
@@ -443,6 +455,7 @@ export function planAddClip(project: TimelineProject, request: AddClipRequest): 
     fadeInMs: request.fadeInMs ?? 0,
     fadeOutMs: request.fadeOutMs ?? 0,
     muted: request.muted ?? false,
+    effectChain: request.effectChain ?? null,
   };
 
   const rejection = validateModifiedClip(project, clip);
@@ -587,6 +600,14 @@ export interface SplitClipRequest {
  * at 0; the right half fades in at 0 and keeps the original fade out (likewise clamped).
  * Copying both fades to both halves would invent a fade in the middle of previously continuous
  * audio. Recorded as an open question in task 4.1's report.
+ *
+ * **Both halves keep the original's `Effect_Chain`**, inherited through the spread. Requirement
+ * 29.31 makes a chain a per-clip setting applied to that clip's trimmed audio, and both halves
+ * are clips over the same asset; giving the chain to only one of them would silently unprocess
+ * half of previously processed audio. It does mean the two halves are processed *independently*,
+ * so a delay tail that would have crossed the cut point no longer does — which is a
+ * consequence of Requirement 29.31's per-clip processing and not of this rule, and is the same
+ * thing that already happens at the outer edge of any clip (see `clip-effects.ts`).
  */
 export function planSplitClip(project: TimelineProject, request: SplitClipRequest): EditPlan {
   const clip = findClip(project, request.clipId);
