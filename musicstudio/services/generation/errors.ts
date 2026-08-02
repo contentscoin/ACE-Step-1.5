@@ -162,7 +162,28 @@ export type GenerationErrorCode =
    * retryable by changing the request: the two sides of the seam have drifted. Rendered
    * as 502 for the same reason.
    */
-  | 'mixdown_render_invalid';
+  | 'mixdown_render_invalid'
+  /** Requirements 11.1, 11.9 — no such Audio_Asset, or one this account does not own. */
+  | 'library_asset_not_found'
+  | 'library_asset_forbidden'
+  /** Requirements 11.2-11.4, 11.12 — a listing request the library cannot answer. */
+  | 'library_query_invalid'
+  /** Requirement 11.3's tag rules, carrying every violated tag rather than the first. */
+  | 'library_tags_invalid'
+  /** Requirement 11.10 — no such playlist, or one this account does not own. */
+  | 'library_playlist_not_found'
+  | 'library_playlist_forbidden'
+  | 'library_playlist_invalid'
+  /**
+   * Requirements 13.2, 13.4, 13.9 — the download was refused.
+   *
+   * One code for the three, because a client acts on the payload: `offeredFormats` for a
+   * format that is not on offer, `requiredPlanIds` for 13.4's "필요한 요금제". Splitting
+   * them would make a client branch on a code to read a field it can just look for.
+   */
+  | 'library_download_refused'
+  /** The asset exists but its audio does not — purged, or never stored. */
+  | 'library_audio_unavailable';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

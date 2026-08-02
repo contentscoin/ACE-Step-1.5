@@ -32,6 +32,14 @@ export interface PlanDefinition {
   readonly maxConcurrentJobs: number;
   /** Requirement 2.14 — every Asset_Kind has an explicit ceiling. */
   readonly maxMonthlyAssetsByKind: Readonly<Record<AssetKind, number>>;
+  /**
+   * Requirement 13.4's 무손실 다운로드 entitlement.
+   *
+   * A plan field rather than a separate table, because 13.4 asks a download to name "필요한
+   * 요금제" and that answer is exactly "the plans whose flag is true" — derivable from the
+   * plan list itself, with nothing to keep in step.
+   */
+  readonly losslessDownload: boolean;
 }
 
 const FREE_PLAN: PlanDefinition = {
@@ -41,6 +49,9 @@ const FREE_PLAN: PlanDefinition = {
   maxJobsPerMonth: 30,
   maxConcurrentJobs: 1,
   maxMonthlyAssetsByKind: { song: 10, bgm: 10, sfx: 20, dialogue: 10, stem: 5, mix: 5 },
+  // Requirement 13.4: the free plan is the one that does not include it, which is what
+  // gives 13.4 something to refuse and a plan to name.
+  losslessDownload: false,
 };
 
 const CREATOR_PLAN: PlanDefinition = {
@@ -50,6 +61,7 @@ const CREATOR_PLAN: PlanDefinition = {
   maxJobsPerMonth: 500,
   maxConcurrentJobs: 3,
   maxMonthlyAssetsByKind: { song: 200, bgm: 200, sfx: 400, dialogue: 200, stem: 100, mix: 100 },
+  losslessDownload: true,
 };
 
 const STUDIO_PLAN: PlanDefinition = {
@@ -59,6 +71,7 @@ const STUDIO_PLAN: PlanDefinition = {
   maxJobsPerMonth: 3_000,
   maxConcurrentJobs: 8,
   maxMonthlyAssetsByKind: { song: 1_000, bgm: 1_000, sfx: 2_000, dialogue: 1_000, stem: 500, mix: 500 },
+  losslessDownload: true,
 };
 
 export const PLANS: readonly PlanDefinition[] = [FREE_PLAN, CREATOR_PLAN, STUDIO_PLAN];
