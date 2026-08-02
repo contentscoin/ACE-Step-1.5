@@ -49,6 +49,8 @@ from .formats import AudioFormat, decode, encode
 from .loudness import measure
 from .mastering import clean_dialogue, duck, normalise_loudness
 from .mfcc import CUE_PAIR_SIMILARITY_CEILING, mfcc_vector, similarity_report
+from .mixdown import RenderParams, TrackRender, render_mixdown
+from .mixdown_clip import ClipRender
 from .pipeline import (
     STORAGE_FORMAT,
     convert_for_download,
@@ -70,6 +72,7 @@ __all__ = [
     "cue_pack_similarity_task",
     "duck_task",
     "export_sound_pack_task",
+    "render_mixdown_task",
     "measure_loudness_task",
     "normalise_for_storage_task",
     "normalise_loudness_task",
@@ -167,6 +170,72 @@ def apply_effect_chain_task(
         "tail_truncated": result.tail_truncated,
     }
 
+
+
+@celery_app.task(name="musicstudio_dsp.render_mixdown")
+def render_mixdown_task(
+    clips: list[dict[str, Any]],
+    tracks: dict[str, dict[str, Any]] | None = None,
+    sample_rate: int = 48_000,
+    channels: int = 2,
+    peak_normalise: bool = True,
+    audio_format: AudioFormat = STORAGE_FORMAT,
+) -> dict[str, Any]:
+    """Requirements 28.24–28.29. Shell over :func:`mixdown.render_mixdown`.
+
+    ``clips`` is the **render target set**: Requirements 28.19 and 28.20 have been
+    applied by ``domain/timeline/render-target.ts`` before the task is queued, so an
+    excluded clip arrives as an absence rather than as a flag. Each entry carries its
+    own audio, base64-encoded in the storage format, because a worker that fetched from
+    object storage itself would put a network round trip inside the arithmetic that
+    Requirement 28.27 requires to be reproducible.
+
+    ``tracks`` is keyed by track index as a *string*: JSON object keys are strings, and
+    converting here rather than trusting the transport keeps the task callable from a
+    plain JSON client. Absent keys render at unity gain and centre pan.
+    """
+    settings = RenderParams(
+        sample_rate=sample_rate, channels=channels, peak_normalise=peak_normalise
+    )
+    result = render_mixdown(
+        [
+            ClipRender(
+                clip_id=str(clip["clip_id"]),
+                audio=decode(base64.b64decode(clip["audio_base64"])),
+                start_time_ms=int(clip["start_time_ms"]),
+                track=int(clip["track"]),
+                trim_start_ms=int(clip.get("trim_start_ms", 0)),
+                trim_end_ms=int(clip.get("trim_end_ms", 0)),
+                gain_db=float(clip.get("gain_db", 0.0)),
+                fade_in_ms=int(clip.get("fade_in_ms", 0)),
+                fade_out_ms=int(clip.get("fade_out_ms", 0)),
+                effect_chain=tuple(clip.get("effect_chain", ())),
+            )
+            for clip in clips
+        ],
+        tracks={
+            int(index): TrackRender(
+                volume_db=float(setting.get("volume_db", 0.0)),
+                pan=float(setting.get("pan", 0.0)),
+            )
+            for index, setting in (tracks or {}).items()
+        },
+        params=settings,
+    )
+    return {
+        "audio_base64": base64.b64encode(encode(result.audio, audio_format)).decode("ascii"),
+        "audio_format": audio_format,
+        "sample_rate": result.audio.sample_rate,
+        "channels": result.audio.channel_count,
+        "frame_count": result.audio.frame_count,
+        "duration_ms": result.audio.duration_ms,
+        # Requirements 28.24 and 28.28: 0 dB when the sum fit, the applied figure when
+        # it did not. Reported rather than recomputed, so the `mix` asset's metadata
+        # records what happened instead of what should have.
+        "attenuation_db": result.attenuation_db,
+        "peak_before": result.peak_before,
+        "peak_after": result.peak_after,
+    }
 
 
 @celery_app.task(name="musicstudio_dsp.measure_loudness")
