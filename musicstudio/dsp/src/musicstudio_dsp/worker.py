@@ -51,6 +51,7 @@ from .mastering import clean_dialogue, duck, normalise_loudness
 from .mfcc import CUE_PAIR_SIMILARITY_CEILING, mfcc_vector, similarity_report
 from .mixdown import RenderParams, TrackRender, render_mixdown
 from .mixdown_clip import ClipRender
+from .waveform import reduce_to_waveform
 from .pipeline import (
     STORAGE_FORMAT,
     convert_for_download,
@@ -73,6 +74,7 @@ __all__ = [
     "duck_task",
     "export_sound_pack_task",
     "render_mixdown_task",
+    "waveform_task",
     "measure_loudness_task",
     "normalise_for_storage_task",
     "normalise_loudness_task",
@@ -235,6 +237,26 @@ def render_mixdown_task(
         "attenuation_db": result.attenuation_db,
         "peak_before": result.peak_before,
         "peak_after": result.peak_after,
+    }
+
+
+@celery_app.task(name="musicstudio_dsp.waveform")
+def waveform_task(audio_base64: str, buckets: int) -> dict[str, Any]:
+    """Requirement 12.7. Shell over :func:`waveform.reduce_to_waveform`.
+
+    Returns two parallel arrays rather than a list of pairs: the result crosses a JSON
+    boundary and then a network, and ``{"min": [...], "max": [...]}`` is roughly half the
+    bytes of ``[{"min": ..., "max": ...}, ...]`` for a drawing that may hold 4000 buckets.
+    """
+    audio = decode(base64.b64decode(audio_base64))
+    reduced = reduce_to_waveform(audio, buckets)
+    return {
+        "buckets": len(reduced),
+        "min": [bucket.min for bucket in reduced],
+        "max": [bucket.max for bucket in reduced],
+        "duration_ms": audio.duration_ms,
+        "channels": audio.channel_count,
+        "sample_rate": audio.sample_rate,
     }
 
 

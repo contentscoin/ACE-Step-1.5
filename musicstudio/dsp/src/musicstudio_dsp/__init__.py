@@ -48,6 +48,7 @@ from .mixdown import (
     render_mixdown,
 )
 from .mixdown_clip import ClipRender, MixdownError, ms_to_frames, render_clip
+from .waveform import WaveformBucket, bucket_boundaries, reduce_to_waveform
 from .formats import (
     DOWNLOAD_FORMATS,
     LOSSLESS_FORMATS,
@@ -100,7 +101,9 @@ __all__ = [
     "SpeechRegion",
     "TrackRender",
     "UnsupportedFormatError",
+    "WaveformBucket",
     "__version__",
+    "bucket_boundaries",
     "clean_dialogue",
     "convert",
     "convert_for_download",
@@ -119,6 +122,7 @@ __all__ = [
     "normalise_sample_rate",
     "normalise_sample_rate_strict",
     "octave_band_energies_db",
+    "reduce_to_waveform",
     "render_clip",
     "render_mixdown",
     "resample",

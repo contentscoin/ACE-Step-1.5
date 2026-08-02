@@ -183,7 +183,24 @@ export type GenerationErrorCode =
    */
   | 'library_download_refused'
   /** The asset exists but its audio does not — purged, or never stored. */
-  | 'library_audio_unavailable';
+  | 'library_audio_unavailable'
+  /** Requirement 12.1 — no such Audio_Asset to play. */
+  | 'playback_asset_not_found'
+  /**
+   * Requirement 12.6 — a private asset, and the requester is not its owner.
+   *
+   * 404 rather than 403, unlike Requirement 11.9's library refusal. 11.9 states its status
+   * for an owner acting on their own library, where existence is already known. A stream
+   * URL is guessable and reachable without a session, so answering 403 would confirm that
+   * a private asset exists to anyone who asked. The requirement fixes neither code.
+   */
+  | 'playback_asset_private'
+  /** Requirement 12.2 — the requested byte range does not overlap the object. */
+  | 'playback_range_unsatisfiable'
+  /** The asset exists but its audio does not, so there is nothing to stream. */
+  | 'playback_audio_unavailable'
+  /** Requirement 12.7 — a bucket count outside the permitted range. */
+  | 'playback_waveform_request_invalid';
 
 export class GenerationError extends Error {
   readonly statusCode: number;
