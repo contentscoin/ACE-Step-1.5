@@ -106,7 +106,7 @@
 
 ## Phase 2: Core Generation (곡, BGM, SFX, 대사, V2A)
 
-- [x] 2. 생성 서비스 구현
+- [ ] 2. 생성 서비스 구현
   - [x] 2.1 ACE_Engine_Adapter 및 Simple/Custom 모드 곡 생성
     - ACE_Engine HTTP API 연동 어댑터 (submit, poll, fetchResult)
     - Simple_Mode: `sample_mode=true`, `thinking=true`, 설명 1–2000자 검증
@@ -166,7 +166,8 @@
     - _설계: §5.4_
     - **수용 기준**: 온셋 정렬률 90% 이상 달성, 산출 오디오 길이 ±40ms 이내
 
-  - [x] 2.7 Speech_Service 및 Voice_Service 구현 (대사 생성, 음성 복제)
+  - [ ] 2.7 Speech_Service 및 Voice_Service 구현 (대사 생성, 음성 복제)
+    - **잔여**: Requirement 27의 전사 엔진 어댑터(설계 §13의 Transcription_Adapter)가 미구현이다. `Transcription_Service`와 `TranscriptionEnginePort`는 존재하나 포트를 구현하는 프로덕션 어댑터가 없어 `adapters/transcription/`이 비어 있고, Req 27.1의 전사 반환이 실제로 동작하지 않는다. Req 25·26 범위(대사 생성, Voice_Profile, 음성 변환)는 완료 상태다
     - TTS_Adapter: 2개+ 엔진 연동, 언어 코드 검증
     - 스크립트 분할(800자 기본, 행/문장 종결 위치), 50ms 교차 페이드 접합
     - 행 단위 타이밍 저장, 개별 행 재합성 (타이밍 재정렬)
@@ -230,7 +231,7 @@
 ## Phase 4: Timeline & Editing (타임라인, 믹스다운)
 
 - [ ] 4. 타임라인 및 믹스다운 구현
-  - [ ] 4.1 Timeline_Service 구현 (프로젝트, 클립, 되돌리기)
+  - [x] 4.1 Timeline_Service 구현 (프로젝트, 클립, 되돌리기)
     - Timeline_Project CRUD: 이름, 설명, 템포(30–300 BPM), 박자(2/3/4/6)
     - Timeline_Clip 관리: 추가, 이동, 트리밍, 분할, 복제, 삭제
     - 트랙 0–31, 클립 상한 500, 동일 트랙 겹침 방지
