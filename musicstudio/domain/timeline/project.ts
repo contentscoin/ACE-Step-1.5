@@ -66,6 +66,8 @@ import {
   isTrackPan,
   isTrackVolumeDb,
 } from './bounds';
+import { chainViolations } from '../effects/chain';
+import type { EffectChain } from '../effects/chain';
 
 /** Requirement 28.2's stored fields, plus the identifier 28.32 compares. */
 export interface TimelineClip {
@@ -81,6 +83,16 @@ export interface TimelineClip {
   readonly fadeInMs: number;
   readonly fadeOutMs: number;
   readonly muted: boolean;
+  /**
+   * Requirement 29.31's per-clip Effect_Chain. `null` when the clip has none.
+   *
+   * Deliberately **not** in `TIMELINE_CLIP_FIELDS`. That list is the field set Requirement
+   * 28.32 enumerates for the project equivalence relation, and 28.32 does not name a chain;
+   * more importantly the relation compares its members with `!==`, which two structurally
+   * identical chains from a round trip would fail. The chain is compared instead by design
+   * §7.1's *chain equivalence relation* — see `timelineClipsEquivalent`.
+   */
+  readonly effectChain: EffectChain | null;
 }
 
 /**
@@ -160,6 +172,7 @@ export type TimelineViolationCode =
   | 'clip_gain_range'
   | 'clip_fade_range'
   | 'clip_mute_invalid'
+  | 'clip_effect_chain_invalid'
   | 'clip_overlap'
   | 'track_volume_range'
   | 'track_pan_range'
@@ -372,6 +385,21 @@ export function clipViolations(clip: TimelineClip): TimelineViolation[] {
         violation: 'clip_play_length_too_short',
         expected: `>= ${String(CLIP_PLAY_LENGTH_MIN_MS)} ms of play length`,
         actual: String(clipPlayLengthMs(clip)),
+      });
+    }
+  }
+
+  // Requirement 29.31: a chain on a clip is the same chain Requirement 29.9 validates, so it
+  // is checked with the same function rather than a second, drifting copy of the rules.
+  if (clip.effectChain !== null && clip.effectChain !== undefined) {
+    for (const violation of chainViolations(clip.effectChain)) {
+      const expected = violation.permittedRange ?? violation.name;
+      violations.push({
+        field: 'effectChain',
+        index: violation.index,
+        violation: 'clip_effect_chain_invalid',
+        ...(expected === undefined ? {} : { expected }),
+        actual: violation.violation,
       });
     }
   }

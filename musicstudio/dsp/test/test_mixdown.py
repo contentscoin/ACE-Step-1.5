@@ -15,6 +15,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from musicstudio_dsp.audio_buffer import AudioBuffer
+from musicstudio_dsp.effects import pedalboard_available
 from musicstudio_dsp.mixdown import (
     PEAK_TARGET,
     RenderParams,
@@ -478,3 +479,88 @@ class TestProperty13MixdownReproducibility:
         assert len(here) == len(there)
         for index, (left, right) in enumerate(zip(here, there)):
             assert left == right, f"channel {index} differs across processes"
+
+
+# --------------------------------------------------------------------------------------
+# Requirement 29.31 — a clip's own Effect_Chain
+# --------------------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not pedalboard_available(),
+    reason="pedalboard is unavailable (native wheel needs libatomic.so.1 from the platform)",
+)
+class TestClipEffectChain:
+    """Task 4.3's clause: the chain is applied to trimmed audio and cut to the play length.
+
+    The cut is design §6.3's, and it is what keeps a delay or reverb tail out of the mix
+    while Requirement 29.32 still lets the same chain keep its tail when it is stored as a
+    Generation_Version. Both behaviours come from one `apply_chain`; only the mixdown
+    truncates, and only here.
+    """
+
+    GAIN = [{"kind": "gain", "parameters": {"gain_db": -6.0}}]
+    # Every parameter, because `validate_chain` requires a complete map (Requirement 29.9).
+    REVERB = [
+        {
+            "kind": "reverb",
+            "parameters": {
+                "room_size": 0.8,
+                "damping": 0.5,
+                "wet_level": 0.5,
+                "dry_level": 0.4,
+                "width": 1.0,
+            },
+        }
+    ]
+
+    def test_applies_the_chain_to_the_clip(self) -> None:
+        plain = render_mixdown([clip("a", start_time_ms=0, track=0, frames=4_800)])
+        attenuated = render_mixdown(
+            [clip("a", start_time_ms=0, track=0, frames=4_800, effect_chain=self.GAIN)]
+        )
+
+        ratio = float(np.max(np.abs(attenuated.audio.channels[0]))) / float(
+            np.max(np.abs(plain.audio.channels[0]))
+        )
+        assert math.isclose(ratio, 10.0 ** (-6.0 / 20.0), rel_tol=1e-3)
+
+    def test_cuts_a_reverb_tail_at_the_play_length(self) -> None:
+        """Design §6.3: the tail does not extend the mix."""
+        frames = 4_800
+        without = render_mixdown([clip("a", start_time_ms=0, track=0, frames=frames)])
+        with_tail = render_mixdown(
+            [clip("a", start_time_ms=0, track=0, frames=frames, effect_chain=self.REVERB)]
+        )
+
+        assert with_tail.audio.frame_count == without.audio.frame_count == frames
+
+    def test_a_chain_does_not_change_the_mixdown_length(self) -> None:
+        chained = clip("a", start_time_ms=250, track=0, frames=4_800, effect_chain=self.REVERB)
+        assert render_mixdown([chained]).audio.frame_count == mixdown_frame_count(
+            [chained], SAMPLE_RATE
+        )
+
+    def test_three_renders_with_clip_effects_agree_to_the_last_bit(self) -> None:
+        """Task 4.3's acceptance criterion, and Requirement 28.27 with a chain in play.
+
+        `apply_chain` builds a fresh `Pedalboard` per call precisely so that a stateful
+        effect cannot carry a delay line from one render into the next; this asserts that
+        holds when the chain is reached through the mixdown rather than directly.
+        """
+        clips = [
+            clip("a", start_time_ms=0, track=0, frames=4_800, effect_chain=self.REVERB),
+            clip("b", start_time_ms=100, track=1, frames=4_800, effect_chain=self.GAIN),
+        ]
+        tracks = {0: TrackRender(volume_db=-3.0, pan=-0.4), 1: TrackRender(pan=0.6)}
+
+        renders = [render_mixdown(clips, tracks=tracks) for _ in range(3)]
+
+        first = renders[0]
+        for other in renders[1:]:
+            assert other.audio.frame_count == first.audio.frame_count
+            assert other.attenuation_db == first.attenuation_db
+            for index, (left, right) in enumerate(
+                zip(first.audio.channels, other.audio.channels)
+            ):
+                assert np.array_equal(left, right), f"channel {index} differs"

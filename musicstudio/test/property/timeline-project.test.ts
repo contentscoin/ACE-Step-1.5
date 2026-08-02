@@ -127,6 +127,7 @@ describe('unnumbered Timeline_Project serialisation invariants', () => {
             volumeDb: track.volumeDb,
           })),
           clips: project.clips.map((clip) => ({
+            effectChain: clip.effectChain,
             muted: clip.muted,
             fadeOutMs: clip.fadeOutMs,
             fadeInMs: clip.fadeInMs,

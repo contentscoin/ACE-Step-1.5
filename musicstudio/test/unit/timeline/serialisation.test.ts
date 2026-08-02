@@ -38,9 +38,11 @@ describe('the printed document (Requirement 28.30)', () => {
   it('writes clip fields in the order the equivalence relation iterates', () => {
     const document = projectToDocument(project);
     expect(Object.keys(document.clips[0] ?? {})).toEqual([...CLIP_DOCUMENT_FIELDS]);
-    // The printer's order and the relation's order are the same list, so a field cannot be added
-    // to one and forgotten in the other.
-    expect(CLIP_DOCUMENT_FIELDS).toEqual(TIMELINE_CLIP_FIELDS);
+    // The document's order is the relation's list followed by Requirement 29.31's chain, so a
+    // field cannot be added to one and forgotten in the other. The chain is last and separate
+    // because the relation compares it under the chain equivalence relation rather than with
+    // `!==`; see `timelineClipsEquivalent`.
+    expect(CLIP_DOCUMENT_FIELDS).toEqual([...TIMELINE_CLIP_FIELDS, 'effectChain']);
   });
 
   it('writes all 32 tracks positionally, with no redundant track number', () => {

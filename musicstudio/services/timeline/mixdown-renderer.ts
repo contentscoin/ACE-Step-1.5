@@ -13,9 +13,10 @@
  *    back, so a worker that drifted is caught at the seam rather than in a stored asset;
  * 4. Requirement 28.24's `mix` Audio_Asset, carrying 28.28's attenuation.
  *
- * Credit for the render is **not** deducted here. Requirement 2.12 and its 믹스다운 단가 ×
- * 렌더링 길이 belong to task 4.3, which owns clip effects and the pricing that goes with
- * them; charging in two places would be the kind of duplicate answer §1.4.3 warns about.
+ * Requirement 2.12's charge is taken **after** the render, against the length that was
+ * actually produced. Charging on the planned length would bill for audio the worker never
+ * returned when it failed, and Requirement 28.29's refusal already costs nothing because it
+ * happens before any of this.
  */
 
 import {
@@ -23,6 +24,7 @@ import {
   MIXDOWN_LENGTH_TOLERANCE_MS,
   planMixdown,
 } from '../../domain/timeline/mixdown';
+import { chainToDocument } from '../../domain/effects/chain-printer';
 import type { TimelineClip, TimelineProject } from '../../domain/timeline/project';
 import { GenerationError } from '../generation/errors';
 import {
@@ -48,6 +50,8 @@ export const DEFAULT_RENDER_PARAMS: MixdownRenderParams = {
 export interface MixdownRequest {
   readonly ownerId: string;
   readonly projectId: string;
+  /** Requirement 2.12's charge is recorded against this job. */
+  readonly jobId: string;
   readonly name?: string;
   readonly params?: Partial<MixdownRenderParams>;
   /** The licence record the `mix` asset carries; the caller folds it (design §4.3). */
@@ -62,6 +66,9 @@ export interface MixdownResponse {
   /** Requirements 28.24, 28.28. `0` means the sum fit and nothing was scaled. */
   readonly attenuationDb: number;
   readonly renderedClipIds: readonly string[];
+  /** Requirement 2.12: what the render cost, and what is left. */
+  readonly creditsCharged: number;
+  readonly balanceAfter: number;
 }
 
 export interface MixdownRendererOptions {
@@ -69,6 +76,24 @@ export interface MixdownRendererOptions {
   readonly render: MixdownRenderPort;
   readonly audio: MixdownAudioLocator;
   readonly assets: MixdownAssetWriter;
+  /** Requirement 2.12. The `mix` price row lives in `services/credit/pricing-table.ts`. */
+  readonly credits: MixdownCreditPort;
+}
+
+/**
+ * The slice of `Credit_Service` a mixdown needs.
+ *
+ * A narrow port rather than the whole service, so this module's tests do not have to stand up
+ * Redis to assert Requirement 2.12 — and so that what the renderer is allowed to do to a
+ * balance is visible in one interface.
+ */
+export interface MixdownCreditPort {
+  chargeMixdown(request: {
+    readonly accountId: string;
+    readonly jobId: string;
+    readonly renderDurationMs: number;
+    readonly engineId?: string;
+  }): Promise<{ readonly amount: number; readonly balanceAfter: number }>;
 }
 
 /** Requirement 28.29. Carries the exclusions so a client can see *why* nothing was left. */
@@ -94,7 +119,7 @@ export function mixdownAudioUnavailable(assetId: string, clipId: string): Genera
 }
 
 export function createMixdownRenderer(options: MixdownRendererOptions) {
-  const { store, render, audio, assets } = options;
+  const { store, render, audio, assets, credits } = options;
 
   return {
     async renderProject(request: MixdownRequest): Promise<MixdownResponse> {
@@ -123,6 +148,16 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
       assertLength(result, plan.lengthMs);
       assertAttenuation(result);
 
+      // Requirement 2.12, before the asset is written: a charge that failed after the asset
+      // existed would leave a stored mix nobody paid for, and the asset is the artefact a
+      // user can act on. The engine identifier is the one the price row is keyed by.
+      const charge = await credits.chargeMixdown({
+        accountId: request.ownerId,
+        jobId: request.jobId,
+        renderDurationMs: Math.round(result.durationMs),
+        engineId: MIXDOWN_ENGINE_ID,
+      });
+
       const assetId = await assets.save({
         ownerId: request.ownerId,
         projectId: request.projectId,
@@ -144,6 +179,8 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
         channels: result.channels,
         attenuationDb: result.attenuationDb,
         renderedClipIds: plan.target.clips.map((clip) => clip.id),
+        creditsCharged: charge.amount,
+        balanceAfter: charge.balanceAfter,
       };
     },
   };
@@ -166,6 +203,10 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
         gainDb: clip.gainDb,
         fadeInMs: clip.fadeInMs,
         fadeOutMs: clip.fadeOutMs,
+        // Requirement 29.31. Design §6.3's truncation to the clip's play length is the
+        // worker's (`mixdown_clip.render_clip`); what is decided here is only that the
+        // clip's stored chain is the one applied.
+        effectChain: clip.effectChain === null ? null : chainToDocument(clip.effectChain),
       });
     }
     return located;

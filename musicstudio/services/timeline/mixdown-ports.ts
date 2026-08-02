@@ -19,10 +19,19 @@
  * done; reporting what it did is what makes the metadata an account of the render.
  */
 
+import { MIXDOWN_RENDERER_ENGINE_ID } from '../../adapters/registry/default-engines';
+import type { EffectItemDocument } from '../../domain/effects/chain-printer';
 import type { AssetProvenance } from '../../domain/provenance';
 
-/** Design §3.6: `mix` is produced internally, with no engine call. */
-export const MIXDOWN_ENGINE_ID = 'mixdown-renderer';
+/**
+ * Design §3.6: `mix` is produced internally, with no engine call.
+ *
+ * Re-exported from the Provider_Registry's table rather than restated. The identifier is
+ * already the key three things agree on — the registry's `mix` routing entry, the
+ * Requirement 2.12 price row in `services/credit/pricing-table.ts`, and the provenance
+ * this renderer writes — and a second literal would be a second answer to settle.
+ */
+export const MIXDOWN_ENGINE_ID = MIXDOWN_RENDERER_ENGINE_ID;
 
 /** One clip, as the worker needs it: where its audio lives plus the clip's own settings. */
 export interface MixdownClipRequest {
@@ -35,6 +44,14 @@ export interface MixdownClipRequest {
   readonly gainDb: number;
   readonly fadeInMs: number;
   readonly fadeOutMs: number;
+  /**
+   * Requirement 29.31's chain, `null` when the clip has none.
+   *
+   * Travels as the printed chain document rather than as an `EffectChain`, so the value the
+   * worker validates is the same one Requirement 29.24's Chain_Printer produces — the reason
+   * `services/effects/ports.ts` gives for sending a chain across a seam in that form.
+   */
+  readonly effectChain: readonly EffectItemDocument[] | null;
 }
 
 export interface MixdownTrackRequest {

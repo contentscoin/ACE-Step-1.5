@@ -172,6 +172,10 @@ function placeClips(specs: readonly ClipSpec[], assetIds: readonly string[]): Ti
       trimStartMs: spec.trimStartMs,
       trimEndMs: spec.trimEndMs,
       gainDb: spec.gainDb,
+      // Requirement 29.31's chain is generated only by the suites that exercise it; the
+      // project arbitraries stay chain-free so the round-trip properties keep measuring
+      // what Requirement 28.32 lists.
+      effectChain: null,
       fadeInMs: Math.min(Math.floor(playLengthMs * spec.fadeInRatio), ceiling),
       fadeOutMs: Math.min(Math.floor(playLengthMs * spec.fadeOutRatio), ceiling),
       muted: spec.muted,
@@ -305,6 +309,7 @@ export function clip(overrides: Partial<TimelineClip> = {}): TimelineClip {
     id: 'clip-a',
     assetId: 'asset-0',
     sourceDurationMs: 10_000,
+    effectChain: null,
     startTimeMs: 0,
     track: 0,
     trimStartMs: 0,

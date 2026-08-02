@@ -38,6 +38,7 @@ function projectRecord(project: TimelineProject): TimelineProjectRecord {
 function harness(project: TimelineProject, result?: Partial<MixdownRenderResult>) {
   const requests: MixdownRenderRequest[] = [];
   const writes: MixdownAssetWriteRequest[] = [];
+  const charges: { accountId: string; jobId: string; renderDurationMs: number }[] = [];
   let stored = projectRecord(project);
 
   const renderer = createMixdownRenderer({
@@ -72,9 +73,17 @@ function harness(project: TimelineProject, result?: Partial<MixdownRenderResult>
         return 'mix-asset-1';
       },
     },
+    credits: {
+      chargeMixdown: async (request) => {
+        charges.push(request);
+        // Mirrors the `mix` row of `services/credit/pricing-table.ts`: 2 base + 1 per second.
+        const amount = 2 + Math.ceil(request.renderDurationMs / 1_000);
+        return { amount, balanceAfter: 100 - amount };
+      },
+    },
   });
 
-  return { renderer, requests, writes, current: () => stored };
+  return { renderer, requests, writes, charges, current: () => stored };
 }
 
 const ONE_SECOND = clip({ id: 'a', track: 0, startTimeMs: 0, sourceDurationMs: 1_000 });
@@ -92,6 +101,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
     const response = await renderer.renderProject({
       ownerId: project.ownerId,
       projectId: project.id,
+      jobId: 'job-1',
       provenance: PROVENANCE,
     });
 
@@ -109,6 +119,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
     const response = await renderer.renderProject({
       ownerId: project.ownerId,
       projectId: project.id,
+      jobId: 'job-1',
       provenance: PROVENANCE,
     });
 
@@ -121,6 +132,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
     const response = await renderer.renderProject({
       ownerId: project.ownerId,
       projectId: project.id,
+      jobId: 'job-1',
       provenance: PROVENANCE,
     });
 
@@ -137,6 +149,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
       renderer.renderProject({
         ownerId: muted.ownerId,
         projectId: muted.id,
+        jobId: 'job-1',
         provenance: PROVENANCE,
       }),
     ).rejects.toMatchObject({ code: 'mixdown_no_render_target', statusCode: 409 });
@@ -155,6 +168,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
       renderer.renderProject({
         ownerId: muted.ownerId,
         projectId: muted.id,
+        jobId: 'job-1',
         provenance: PROVENANCE,
       }),
     ).rejects.toMatchObject({
@@ -172,6 +186,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
     await renderer.renderProject({
       ownerId: twoTracks.ownerId,
       projectId: twoTracks.id,
+      jobId: 'job-1',
       provenance: PROVENANCE,
     });
 
@@ -185,6 +200,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
       renderer.renderProject({
         ownerId: project.ownerId,
         projectId: project.id,
+        jobId: 'job-1',
         provenance: PROVENANCE,
       }),
     ).rejects.toMatchObject({ code: 'mixdown_render_invalid', statusCode: 502 });
@@ -197,6 +213,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
       renderer.renderProject({
         ownerId: project.ownerId,
         projectId: project.id,
+        jobId: 'job-1',
         provenance: PROVENANCE,
       }),
     ).resolves.toMatchObject({ durationMs: 1_008 });
@@ -209,6 +226,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
       renderer.renderProject({
         ownerId: project.ownerId,
         projectId: project.id,
+        jobId: 'job-1',
         provenance: PROVENANCE,
       }),
     ).rejects.toMatchObject({ code: 'mixdown_render_invalid' });
@@ -228,6 +246,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
       render: { render: async () => ({}) as MixdownRenderResult },
       audio: { objectKeyFor: async () => null },
       assets: { save: async () => 'unused' },
+      credits: { chargeMixdown: async () => ({ amount: 0, balanceAfter: 0 }) },
     });
     expect(renderer).toBeDefined();
 
@@ -235,6 +254,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
       rendererWithoutAudio.renderProject({
         ownerId: project.ownerId,
         projectId: project.id,
+        jobId: 'job-1',
         provenance: PROVENANCE,
       }),
     ).rejects.toMatchObject({ code: 'mixdown_audio_unavailable' });
@@ -247,6 +267,7 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
       renderer.renderProject({
         ownerId: project.ownerId,
         projectId: 'missing',
+        jobId: 'job-1',
         provenance: PROVENANCE,
       }),
     ).rejects.toMatchObject({ statusCode: 404 });
@@ -255,8 +276,99 @@ describe('Mixdown_Renderer (Requirements 28.24-28.29)', () => {
       renderer.renderProject({
         ownerId: 'someone-else',
         projectId: project.id,
+        jobId: 'job-1',
         provenance: PROVENANCE,
       }),
     ).rejects.toMatchObject({ statusCode: 403 });
+  });
+  it('passes a clip chain to the worker as a printed chain document (29.31)', async () => {
+    const chained = projectWith([
+      clip({
+        id: 'a',
+        track: 0,
+        sourceDurationMs: 1_000,
+        effectChain: { items: [{ kind: 'gain', parameters: { gain_db: -6 } }] },
+      }),
+    ]);
+    const { renderer, requests } = harness(chained);
+
+    await renderer.renderProject({
+      ownerId: chained.ownerId,
+      projectId: chained.id,
+      jobId: 'job-1',
+      provenance: PROVENANCE,
+    });
+
+    expect(requests[0]?.clips[0]?.effectChain).toEqual([
+      { kind: 'gain', parameters: { gain_db: -6 } },
+    ]);
+  });
+
+  it('sends null for a clip with no chain', async () => {
+    const { renderer, requests } = harness(project);
+    await renderer.renderProject({
+      ownerId: project.ownerId,
+      projectId: project.id,
+      jobId: 'job-1',
+      provenance: PROVENANCE,
+    });
+    expect(requests[0]?.clips[0]?.effectChain).toBeNull();
+  });
+
+  it('charges the mixdown against the rendered length (2.12)', async () => {
+    // A four-second project, so the charge is taken against a length the seam accepts:
+    // billing is downstream of Requirement 28.25's check, not independent of it.
+    const longer = projectWith([
+      clip({ id: 'a', track: 0, startTimeMs: 0, sourceDurationMs: 4_000 }),
+    ]);
+    const { renderer, charges } = harness(longer, { durationMs: 4_000 });
+
+    const response = await renderer.renderProject({
+      ownerId: longer.ownerId,
+      projectId: longer.id,
+      jobId: 'job-77',
+      provenance: PROVENANCE,
+    });
+
+    expect(charges).toHaveLength(1);
+    expect(charges[0]).toMatchObject({
+      accountId: longer.ownerId,
+      jobId: 'job-77',
+      renderDurationMs: 4_000,
+    });
+    // 2 base + 4 seconds at the `mix` row's per-second rate.
+    expect(response.creditsCharged).toBe(6);
+    expect(response.balanceAfter).toBe(94);
+  });
+
+  it('charges nothing when Requirement 28.29 refuses the render', async () => {
+    const muted = projectWith([clip({ id: 'a', track: 0, muted: true })]);
+    const { renderer, charges } = harness(muted);
+
+    await expect(
+      renderer.renderProject({
+        ownerId: muted.ownerId,
+        projectId: muted.id,
+        jobId: 'job-1',
+        provenance: PROVENANCE,
+      }),
+    ).rejects.toMatchObject({ code: 'mixdown_no_render_target' });
+
+    expect(charges).toHaveLength(0);
+  });
+
+  it('charges nothing when the returned render breaks an invariant', async () => {
+    const { renderer, charges } = harness(project, { durationMs: 9_000 });
+
+    await expect(
+      renderer.renderProject({
+        ownerId: project.ownerId,
+        projectId: project.id,
+        jobId: 'job-1',
+        provenance: PROVENANCE,
+      }),
+    ).rejects.toMatchObject({ code: 'mixdown_render_invalid' });
+
+    expect(charges).toHaveLength(0);
   });
 });
