@@ -7,7 +7,11 @@
  */
 
 import type { AssetKind } from '../domain/asset-kind';
+import type { EditParameters } from '../domain/edit/request';
 import { CANONICAL_SAMPLE_RATE } from '../domain/provenance';
+import type { SfxParameters } from '../domain/sfx/request';
+import type { SongParameters } from '../domain/song/request';
+import type { SpeechParameters } from '../domain/speech/request';
 
 import { ENGINE_JOB_STATE, type EngineJobState, type RawAudioResult } from './engine-job';
 
@@ -43,6 +47,59 @@ export interface NormalizedGenerationRequest {
   readonly seed?: number | null;
   /** Engine chosen explicitly by the caller (Requirement 20.3). */
   readonly engineId?: string;
+  /**
+   * Validated song parameters (Requirements 3, 4), present for Simple/Custom mode
+   * song requests.
+   *
+   * Musical vocabulary, not engine vocabulary: caption, lyrics, BPM, key/scale,
+   * time signature, batch size. Translating those into any one engine's field names
+   * stays inside that engine's adapter, so nothing above the adapter layer learns
+   * an engine's spelling. Absent for requests that carry only a prompt, which every
+   * engine understands without help.
+   */
+  readonly song?: SongParameters;
+  /**
+   * Validated Edit_Task parameters (Requirement 7), present for cover, repaint,
+   * extract, lego and complete requests.
+   *
+   * Editing vocabulary, not engine vocabulary — a source audio, a strength, an
+   * interval, a track name — for the same reason `song` is: the translation to
+   * `src_audio_path` / `audio_cover_strength` / `repainting_start` / `track_name`
+   * belongs to the engine's adapter. It carries the validated source descriptor, so
+   * `inputAssetIds` remains the routing-level statement of which assets are inputs
+   * and this is the statement of what the edit does with them.
+   */
+  readonly edit?: EditParameters;
+  /**
+   * Validated sound-effect parameters (Requirement 22), present for `sfx` requests.
+   *
+   * Present for the same reason `song` and `edit` are, and translated for the same reason:
+   * Requirements 22.10–22.12 give the sampling step count and guidance scale as *product*
+   * concepts with product ranges, and turning them into whatever field names a Woosh
+   * deployment uses stays inside `adapters/woosh/`. Nothing above the adapter layer learns
+   * an engine's spelling.
+   *
+   * Note that `seed` is not read from here. A request produces up to eight variants
+   * (22.5, 22.16), each a separate submission with a seed derived from the base
+   * (`domain/sfx/seed.ts`), so the per-submission seed is the one on `seed` above and
+   * `sfx.seed` records only what the caller named.
+   */
+  readonly sfx?: SfxParameters;
+  /**
+   * Validated dialogue parameters (Requirement 25), present for `dialogue` requests.
+   *
+   * Present for the same reason `song`, `edit` and `sfx` are, and translated for the same
+   * reason: 25.5's 발화 속도, 25.6's 음높이 조정 and 25.7's 연기 지시 are *product* concepts with
+   * product ranges, and turning them into whatever field names a TTS deployment uses stays
+   * inside `adapters/tts/`. The two engines design §3.6 names for `dialogue` spell all three
+   * differently, which is precisely why nothing above the adapter layer learns either spelling.
+   *
+   * Note that `seed` is not read from here. A dialogue asset is synthesised one line at a time
+   * (Requirements 25.14, 25.15), each submission carrying a seed derived from the base by
+   * `domain/sfx/seed.ts`, so the per-submission seed is the one on `seed` above and
+   * `speech.seed` records only what the caller named.
+   */
+  readonly speech?: SpeechParameters;
 }
 
 export interface NormalizedGenerationResult {

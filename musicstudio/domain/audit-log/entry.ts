@@ -18,8 +18,28 @@ export const AUDIT_EVENT_TYPES = [
   'consent_recorded',
   'license_changed',
   'engine_state_changed',
+  // Requirement 6.3: a Generation_Job whose retries are spent, or which timed
+  // out (5.8), is recorded here. `event_type` is `text` in 0008_audit_log.sql, so
+  // this member needs no migration.
+  'generation_job_failed',
   'commercial_use_denied',
   'quality_threshold_changed',
+  // Requirement 26 (task 6.2). `consent_recorded` above already covers 26.15, and
+  // `visibility_changed` covers 26.33's unpublishing; these are the events with no
+  // existing member. `event_type` is `text` in 0008_audit_log.sql, so no migration
+  // is needed for any of them.
+  /** 26.28 — a consent withdrawal claim was accepted. */
+  'consent_withdrawal_received',
+  /** 26.32 — the claimant's identity was verified; the profile is withdrawn. */
+  'consent_withdrawal_verified',
+  /** 26.34 — verification failed or lapsed; the profile was restored. */
+  'consent_withdrawal_reverted',
+  /** 26.36 — the owner objected and an operator review item was raised. */
+  'consent_withdrawal_objection',
+  /** 26.23 — a Voice_Profile was deleted at the owner's request. */
+  'voice_profile_deleted',
+  /** 26.19 — the profile's share list changed. */
+  'voice_profile_sharing_changed',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

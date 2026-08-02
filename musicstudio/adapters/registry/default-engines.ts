@@ -13,7 +13,18 @@
 import type { AssetKind } from '../../domain/asset-kind';
 
 export const ACE_STEP_ENGINE_ID = 'ace-step-1.5';
+/** §3.6: 고품질 등급 — the non-distilled model of Requirement 22.11. */
 export const WOOSH_FLOW_ENGINE_ID = 'woosh-flow';
+/**
+ * §3.6: 고속 등급 — the distilled model of Requirement 22.10.
+ *
+ * A second engine identifier rather than a parameter on `woosh-flow`, because
+ * Requirement 22.10 and 22.11 name *different models* and Requirement 20.1 makes the
+ * Engine_Descriptor per-engine: the two tiers have different sampling-step windows and
+ * are separately health-checked and separately quota-limited, all of which the registry
+ * tracks per `engineId`. Design §3.6 lists both under `sfx` for the same reason.
+ */
+export const WOOSH_DFLOW_ENGINE_ID = 'woosh-dflow';
 export const TTS_PRIMARY_ENGINE_ID = 'tts-engine-a';
 export const TTS_SECONDARY_ENGINE_ID = 'tts-engine-b';
 /** §3.6: `mix` is produced in-process by Mixdown_Renderer, not by an engine. */

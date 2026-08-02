@@ -10,6 +10,15 @@ import {
   MAX_PARENTS_PER_ASSET,
 } from '../../domain/lineage/limits';
 import { AUDIT_LOG_MIN_RETENTION_DAYS } from '../../domain/audit-log/partition';
+import {
+  ASSET_REVIEW_STATES,
+  isExcludedFromDiscoveryFeed,
+  reviewStateAfterReport,
+} from '../../domain/moderation/review-state';
+import {
+  REPORT_DETAIL_MAX_LENGTH,
+  REPORT_REASONS,
+} from '../../services/moderation/report-service';
 
 /**
  * Parity guard between the migrations and the pure rules they wrap.
@@ -117,6 +126,47 @@ describe('commercial-use parity (design §4.3)', () => {
   it('blocks widening the flag and rewriting provenance', () => {
     expect(sql).toContain('WHEN (NOT OLD.commercial_use_allowed AND NEW.commercial_use_allowed)');
     expect(sql).toContain('CREATE TRIGGER audio_asset_no_provenance_rewrite');
+  });
+});
+
+describe('review state parity (Requirements 16.8, 16.9)', () => {
+  const sql = sqlOf('0009_content_report');
+
+  it('asset_review_state matches the domain list, in order', () => {
+    expect(enumMembers(sql, 'asset_review_state')).toEqual([...ASSET_REVIEW_STATES]);
+  });
+
+  it('report_reason matches the service list, in order', () => {
+    expect(enumMembers(sql, 'report_reason')).toEqual([...REPORT_REASONS]);
+  });
+
+  it('uses the same report transition as domain/moderation/review-state.ts', () => {
+    // reviewStateAfterReport: withheld stays withheld, everything else goes under review.
+    expect(reviewStateAfterReport('withheld')).toBe('withheld');
+    expect(sql).toContain("WHEN p_current = 'withheld' THEN 'withheld'::asset_review_state");
+    expect(sql).toContain("ELSE 'under_review'::asset_review_state");
+  });
+
+  it('uses the same discovery-feed exclusion set as the domain predicate', () => {
+    const excluded = ASSET_REVIEW_STATES.filter(isExcludedFromDiscoveryFeed);
+
+    expect(sql).toContain(
+      `SELECT p_state IN (${excluded.map((state) => `'${state}'`).join(', ')})`,
+    );
+  });
+
+  it('exposes the exclusion as a view rather than leaving it to each caller', () => {
+    expect(sql).toContain('CREATE VIEW audio_asset_discoverable');
+    expect(sql).toContain('NOT asset_review_state_excluded_from_feed(review_state)');
+  });
+
+  it('guards the review transition and reports it under the Requirement 16 SQLSTATE', () => {
+    expect(sql).toContain('CREATE TRIGGER audio_asset_review_transition');
+    expect(sql).toContain("ERRCODE = 'MS016'");
+  });
+
+  it('keeps the report detail bound at the same length as the service', () => {
+    expect(sql).toContain(`char_length(detail) BETWEEN 1 AND ${REPORT_DETAIL_MAX_LENGTH}`);
   });
 });
 

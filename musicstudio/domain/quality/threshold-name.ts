@@ -1,0 +1,195 @@
+/**
+ * The members of the Quality_Threshold_Set (Requirement 34.1).
+ *
+ * 34.1 enumerates the perceptual judgements that must be *adjustable* rather than
+ * compiled in, and the requirements appendix restates the point: the numbers quoted
+ * in Requirements 21, 22, 23, 24 and 30 are this set's **initial values**, not
+ * constants. So no service may inline them — each reads its threshold from the set
+ * and records the set's version alongside whatever it admitted (34.6).
+ *
+ * Two modelling decisions are worth stating, because 34.1's prose does not settle
+ * them and 34.2 forces the question:
+ *
+ * 1. **A range is two members.** 34.1 names "사운드 팩 라우드니스 허용 범위" as one
+ *    item, but 34.2 gives every threshold exactly one current value and one allowed
+ *    adjustment range. A single member cannot hold a low and a high bound and still
+ *    answer 34.2, so the pack loudness window is `sound_pack_loudness_min` and
+ *    `sound_pack_loudness_max`. The set is still "1개" in 34.1's sense: one set, one
+ *    version.
+ * 2. **Bar alignment tolerance is a member.** Requirement 21.6 lists 마디 정합 as one
+ *    of the four loop-seam criteria and design §5.3 gives it a number (±25 ms), yet
+ *    34.1's enumeration omits it while listing the other three. Treating it as a
+ *    constant would leave one of four co-equal criteria unadjustable, so it is
+ *    included here as `loop_bar_alignment_tolerance_ms`.
+ *    **Open question for the spec:** whether 34.1's list is exhaustive or
+ *    illustrative. If exhaustive, this member and the requirement disagree.
+ * 3. **A measured quantity's threshold is a member; the window it is measured
+ *    over is not.** Requirement 23.8 quotes four numbers — a 5 ms frame, a 50 ms
+ *    lookback, a 6.0 dB rise and a 0.50 confidence floor — and only the last two
+ *    are here. The same split `domain/sfx/bounds.ts` documents applies: moving a
+ *    window changes *what the number means*, so every verdict already recorded
+ *    against an earlier version would silently describe a different measurement,
+ *    which Requirement 34.10 forbids. Moving a ceiling changes only which audio is
+ *    admissible, which is exactly what 34.4 is for.
+ */
+
+export const QUALITY_THRESHOLD_NAMES = [
+  /** Requirement 21.7 — loop seam RMS difference ceiling, per channel. */
+  'loop_seam_rms_difference_max',
+  /** Requirement 21.8 — loop seam sample step, as a fraction of channel peak. */
+  'loop_seam_sample_step_ratio_max',
+  /** Requirement 21.16 — loop edge energy floor, relative to overall RMS. */
+  'loop_edge_energy_floor',
+  /** Requirement 21.17 — bar-alignment error budget. See note 2 above. */
+  'loop_bar_alignment_tolerance_ms',
+  /** Requirement 22.15 — one-shot tail amplitude, as a fraction of peak. */
+  'one_shot_tail_amplitude_ratio_max',
+  /** Requirement 24.7 — sound pack loudness window. See note 1 above. */
+  'sound_pack_loudness_min',
+  'sound_pack_loudness_max',
+  /** Requirement 24.9 — cue-pair timbral similarity ceiling. */
+  'cue_pair_similarity_max',
+  /**
+   * Requirement 24.10 — the wall-clock budget for exporting a Sound_Pack.
+   *
+   * The one member that is **not** a perceptual judgement, and the reason is
+   * worth stating because Requirement 34.1's enumeration is a list of perceptual
+   * thresholds and this is a latency budget.
+   *
+   * It belongs here anyway, by the same test every other member above passes:
+   * moving it changes only which *results are admissible* (an export that took
+   * 70 seconds), never what an already-recorded measurement meant. It is a
+   * ceiling on a measured quantity whose right value is discovered by operation
+   * rather than derived — 60 seconds is a product decision about how long a user
+   * will wait, and it is exactly the kind of number Requirement 34.8's
+   * failure-rate review exists to revisit. The alternative was a constant in
+   * `domain/sound-pack/bounds.ts`, which would make the one number in
+   * Requirement 24 most likely to need retuning the only one that could not be.
+   *
+   * **Open question for the spec**, the same one `loop_bar_alignment_tolerance_ms`
+   * and `voice_conversion_length_tolerance_ms` raise: whether 34.1's list is
+   * exhaustive or illustrative, and — here additionally — whether a
+   * non-perceptual budget belongs in a set whose stated subject is 청감 관련
+   * 임계값. If 34.1 is exhaustive and the set is perceptual-only, this member and
+   * the requirement disagree and the number should move to `bounds.ts`.
+   */
+  'sound_pack_export_budget_ms',
+  /** Requirement 23.8 — onset alignment tolerance. */
+  'v2a_onset_alignment_tolerance_ms',
+  /** Requirement 23.8 — fraction of confident visual events that must align. */
+  'v2a_onset_alignment_rate_min',
+  /**
+   * Requirement 23.8 — the short-term RMS rise that *defines* an onset.
+   *
+   * A member rather than a constant for the same reason the other three V2A numbers
+   * are: 6.0 dB is a perceptual judgement about when a sound has "started", and
+   * Requirement 34's whole point is that such judgements are calibrated (34.7) rather
+   * than compiled in. See note 3 below on why the two *window lengths* it is measured
+   * over (5 ms and 50 ms) stay constants.
+   */
+  'v2a_onset_rise_db',
+  /**
+   * Requirements 23.8, 23.15, 23.16 — the confidence at or above which a visual
+   * event must be aligned, and below which it is ignored.
+   */
+  'v2a_visual_event_confidence_min',
+  /** Requirement 23.12 — preview audio/video start offset ceiling. */
+  'v2a_preview_sync_tolerance_ms',
+  /** Requirement 23.9 — output-vs-input duration error ceiling. */
+  'v2a_output_duration_tolerance_ms',
+  /** Requirement 30.x — speech-presence RMS threshold. */
+  'speech_detection_rms_threshold_db',
+  /** Requirement 30.x — minimum run length before a window counts as speech. */
+  'speech_detection_min_duration_ms',
+  /**
+   * Requirement 25.19 — the level at or below which the tail of a dialogue asset
+   * counts as silence, and the window the resulting run must land in.
+   *
+   * Three members for one criterion, by the same two rules the notes above apply.
+   * 25.19 states a *level* (-60 dBFS) and a *range* (50–200 ms): the level is the
+   * judgement about when speech has stopped, which is the same kind of judgement
+   * `speech_detection_rms_threshold_db` already is, and the range is the window the
+   * measured run is adjusted into, which needs two members for the reason note 1
+   * gives about the pack loudness window.
+   *
+   * **Open question for the spec**, the same one note 2 raises: Requirement 34.1's
+   * enumeration names 발화 판정 RMS 임계값 but not the dialogue tail, and the
+   * appendix's list of perceptual thresholds omits it too. Treating 25.19's numbers
+   * as constants would leave a plainly perceptual judgement — how much silence
+   * belongs at the end of a line of speech — unadjustable, so they are members here.
+   */
+  'dialogue_tail_silence_floor_dbfs',
+  'dialogue_tail_silence_min_ms',
+  'dialogue_tail_silence_max_ms',
+  /**
+   * Requirement 26.25 — how far a voice conversion's length may sit from its source.
+   *
+   * A member for the same reason `v2a_output_duration_tolerance_ms` is (Requirement
+   * 23.9's ±40 ms, added by task 2.6): it is a ceiling on a measured error, so moving
+   * it changes only which conversions are admissible, never what an already-recorded
+   * measurement meant. Requirement 34.1 does not name it either; see the note above.
+   */
+  'voice_conversion_length_tolerance_ms',
+  /**
+   * Requirements 30.6, 30.8 — how far the achieved integrated loudness may sit from the
+   * requested target and still count as normalised.
+   *
+   * A member rather than a constant for the reason note 3 gives: it is a ceiling on a
+   * *measured error*, so moving it changes only which results are admissible and never
+   * what an already-recorded measurement meant. It is also the *precondition* of Property
+   * 15 — the idempotence claim is made about audio already inside this band — so the
+   * property and the requirement read one number rather than two that happen to agree.
+   */
+  'loudness_normalization_target_tolerance_lufs',
+  /**
+   * Requirement 30.8 — the gain-change ceiling on a re-application.
+   *
+   * This is the number Property 15 asserts. It is a member rather than a literal in the
+   * test so the property cannot drift from the clause it validates, and so a calibration
+   * that loosened it would loosen the requirement and the test together, visibly.
+   */
+  'loudness_normalization_idempotence_gain_db',
+  /**
+   * Requirement 30.9 — how far below the input a non-speech section's mean RMS must be
+   * driven by dialogue cleanup.
+   *
+   * A floor on an *achieved* attenuation rather than a ceiling on an error, but the same
+   * argument applies: it decides which cleanups are admissible, not what any already
+   * recorded measurement meant.
+   */
+  'dialogue_cleanup_non_speech_attenuation_min_db',
+  /** Requirement 30.9 — how far the speech sections' loudness may move during cleanup. */
+  'dialogue_cleanup_speech_loudness_tolerance_lufs',
+  /** Requirement 30.10 — cleanup output-vs-input length error ceiling. */
+  'dialogue_cleanup_length_tolerance_ms',
+  /** Requirement 30.12 — how close the achieved duck must sit to the requested depth. */
+  'ducking_depth_accuracy_db',
+  /** Requirement 30.16 — how far the bed may move while no speech is present. */
+  'ducking_non_speech_hold_db',
+] as const;
+
+export type QualityThresholdName = (typeof QUALITY_THRESHOLD_NAMES)[number];
+
+/**
+ * Units, kept as a closed list so a threshold cannot be stored with prose for a
+ * unit and so a comparison against the wrong scale is visible in review.
+ */
+export const QUALITY_THRESHOLD_UNITS = [
+  'db',
+  'dbfs',
+  'lufs',
+  'ms',
+  /** Dimensionless 0..1 fraction of a peak amplitude. */
+  'amplitude_ratio',
+  /** Dimensionless 0..1 fraction of a population. */
+  'fraction',
+  'cosine_similarity',
+] as const;
+
+export type QualityThresholdUnit = (typeof QUALITY_THRESHOLD_UNITS)[number];
+
+export function isQualityThresholdName(value: unknown): value is QualityThresholdName {
+  return (
+    typeof value === 'string' && (QUALITY_THRESHOLD_NAMES as readonly string[]).includes(value)
+  );
+}

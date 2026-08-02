@@ -53,7 +53,7 @@ jobs:
         run: python dsp/scripts/check_import_boundary.py
 
   typescript:
-    name: TypeScript (typecheck + fast-check)
+    name: TypeScript (lint + typecheck)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -76,8 +76,47 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+  # The suite is sharded so that no vitest process outlives the reporting RPC's
+  # timeout. A worker reports progress by awaiting `onTaskUpdate` over birpc,
+  # which gives up after a hardcoded 60 s that vitest does not expose to config.
+  # The whole suite takes ~103 s on this runner, so a call left unanswered has
+  # room to reach that ceiling; the timeout then throws in the worker and vitest
+  # counts it as an unhandled error, failing a run in which all 2666 tests
+  # passed. The longest shard measures ~51 s, roughly halving the exposure.
+  #
+  # Sharding rather than a hand-written list of paths, so that adding a test
+  # file cannot unbalance the split or leave it unrun — `--shard` covers every
+  # file vitest collects. Four shards, because the floor is set by the single
+  # heaviest file (`sound-pack/cue-synthesis` ~30 s) and cannot be split
+  # further: six shards measured no faster (53.9 s) than four.
+  #
+  # A matrix rather than sequential steps: the shards run concurrently, so the
+  # split shortens the critical path instead of adding four cold starts to it.
+  typescript-tests:
+    name: TypeScript tests (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      # Every shard reports, so one failure does not hide the others.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: musicstudio
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: musicstudio/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci || npm install
+
       - name: Test (vitest + fast-check)
-        run: npm test
+        run: npm test -- --shard=${{ matrix.shard }}/4
 
   dsp:
     name: DSP worker (pytest + hypothesis)

@@ -2,14 +2,24 @@ import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from
 
 import { isRegistryError } from '../../adapters/registry/errors';
 import { isAccountError } from '../../services/account/errors';
+import { isCreditError } from '../../services/credit/errors';
+import { isGenerationError } from '../../services/generation/errors';
+import { isModerationError } from '../../services/moderation/errors';
+import { isVoiceError } from '../../services/voice/errors';
 
 /**
  * Single error contract for the gateway.
  *
  * Every failure body is `{ "error": { "code", "message", ... } }`. The `code`
  * is the machine-readable reason several criteria ask for (1.2 duplicate, 1.8
- * token expiry, 20.5/20.6/20.11/20.13/20.22/20.23 registry rejections), so
- * clients branch on `code`, never on status alone.
+ * token expiry, 20.5/20.6/20.11/20.13/20.22/20.23 registry rejections,
+ * 16.2/16.4/16.11/16.12/16.14 moderation refusals, 2.3/2.6/2.11 credit
+ * refusals, 26.13/26.20/26.22/26.29/26.35 voice consent refusals), so clients
+ * branch on `code`, never on status alone.
+ *
+ * Requirement 26.29 is why that matters concretely: a 403 from a withdrawn Voice_Profile
+ * and a 403 from a share list both arrive as 403, and only `code` plus
+ * `withdrawalReasonCode` tell them apart.
  */
 export interface ErrorBody {
   readonly error: {
@@ -42,7 +52,14 @@ interface CodedDomainError {
 
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler((error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
-    if (isAccountError(error) || isRegistryError(error)) {
+    if (
+      isAccountError(error) ||
+      isRegistryError(error) ||
+      isModerationError(error) ||
+      isCreditError(error) ||
+      isGenerationError(error) ||
+      isVoiceError(error)
+    ) {
       sendDomainError(reply, error);
       return;
     }

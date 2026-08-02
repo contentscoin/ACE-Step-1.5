@@ -14,6 +14,8 @@ own transaction, so a failure leaves nothing half-applied.
 | `0006_lineage_invariants.sql` | acyclicity, depth ≤ 32, ≤ 64 parents, stem/mix need an input |
 | `0007_commercial_use.sql` | write-time propagation + verification views (design §4.3) |
 | `0008_audit_log.sql` | append-only monthly-partitioned audit log (design §4.4) |
+| `0009_content_report.sql` | content reports + `audio_asset.review_state` and the discovery-feed view (Req 16.8, 16.9) |
+| `0010_credit.sql` | plans, per-Asset_Kind ceilings, the unit-price table and the append-only credit ledger (Req 2) |
 
 ## Where the rules live
 
@@ -25,15 +27,20 @@ The lineage and commercial-use rules are stated once, in `../domain/`:
 | Commercial-use fold and monotonicity | `domain/commercial-use.ts` | `lineage_propagate_commercial_use()`, `audio_asset_commercial_use_violation` |
 | Partition naming and retention floor | `domain/audit-log/partition.ts` | `audit_log_ensure_partition()`, `audit_log_prunable_partitions()` |
 | PII masking formats | `domain/audit-log/masking.ts` | `audit_log_email_masked`, `audit_log_api_key_masked` CHECKs |
+| Review states, transitions, feed exclusion | `domain/moderation/review-state.ts` | `asset_review_state_after_report()`, `asset_review_state_excluded_from_feed()`, view `audio_asset_discoverable` |
+| Plan ceilings and the rate card | `domain/credit/plan.ts`, `services/credit/pricing-table.ts` | `credit_plan`, `credit_plan_asset_cap`, `credit_price` seeds |
+| Ledger shape, refund and usage folds | `domain/credit/ledger-entry.ts`, `domain/credit/usage.ts` | `credit_ledger_entry` CHECKs, `credit_ledger_validate_refund()`, views `credit_monthly_usage`, `credit_monthly_asset_usage` |
 
 The SQL side is a thin wrapper: same limits, same invariant names, same payload.
-`test/unit/schema-parity.test.ts` fails if the two drift apart, and it needs no
-database.
+`test/unit/schema-parity.test.ts` and `test/unit/credit/schema-parity.test.ts` fail
+if the two drift apart, and neither needs a database.
 
 Errors carry a custom SQLSTATE and a JSON `DETAIL` naming the violated invariant
 and the offending asset ids (Requirement 19.13):
 
 ```
+MS002  credit and quota invariant (Requirement 2)
+MS016  content report / review state transition (Requirement 16)
 MS019  Audio_Asset / lineage invariant (Requirement 19)
 MS033  commercial-use propagation (Requirement 33)
 MS018  audit log append-only / retention (design §4.4)

@@ -37,7 +37,7 @@
 
 ## Phase 1: Foundation (데이터 모델, 인프라, 엔진 추상화)
 
-- [ ] 1. 기반 인프라 및 데이터 모델 구축
+- [x] 1. 기반 인프라 및 데이터 모델 구축
   - [x] 1.0 스캐폴드 및 결합 경계 강제
     - `musicstudio/` 디렉터리 구조 생성 (설계 §1.4.5의 최상위 형태): `musicstudio/api/`, `musicstudio/services/`, `musicstudio/adapters/`, `musicstudio/domain/`, `musicstudio/dsp/`, `musicstudio/web/`, `musicstudio/db/`, `musicstudio/test/`
     - `musicstudio/package.json`, `musicstudio/tsconfig.json` 신규 생성 (제품 계층 Node/TypeScript 의존성·컴파일러 설정 독립 선언)
@@ -84,7 +84,7 @@
     - **수용 기준**: 엔진 등록→상태 점검→사용 불가 전이→복귀 시나리오 테스트 통과
 
 
-  - [ ] 1.4 Credit_Service 구현 (크레딧 차감, 환급, 쿼터)
+  - [x] 1.4 Credit_Service 구현 (크레딧 차감, 환급, 쿼터)
     - Redis 원자 연산 기반 크레딧 잔액 관리
     - Asset_Kind × Engine 조합별 단가표 구현
     - 월간 쿼터, 동시 진행 상한, 요금제별 제한 적용
@@ -93,7 +93,7 @@
     - _설계: §2.4_
     - **수용 기준**: 잔액 부족 시 402, 동시 상한 초과 시 429, 실패 작업 환급 확인
 
-  - [ ] 1.5 Job_Orchestrator 및 BullMQ 작업 큐 구현
+  - [x] 1.5 Job_Orchestrator 및 BullMQ 작업 큐 구현
     - BullMQ 기반 Generation_Job 등록, 상태 폴링(5초 간격), 재시도(지수 백오프 3회)
     - SSE(Server-Sent Events) 실시간 상태 전송
     - 900초 시간 초과 → 실패 처리 + 크레딧 환급
@@ -107,7 +107,7 @@
 ## Phase 2: Core Generation (곡, BGM, SFX, 대사, V2A)
 
 - [ ] 2. 생성 서비스 구현
-  - [ ] 2.1 ACE_Engine_Adapter 및 Simple/Custom 모드 곡 생성
+  - [x] 2.1 ACE_Engine_Adapter 및 Simple/Custom 모드 곡 생성
     - ACE_Engine HTTP API 연동 어댑터 (submit, poll, fetchResult)
     - Simple_Mode: `sample_mode=true`, `thinking=true`, 설명 1–2000자 검증
     - Custom_Mode: 가사, BPM(30–300), 키(70개), 박자(2/3/4/6), 길이(10–600초) 검증
@@ -118,7 +118,7 @@
     - **수용 기준**: Simple 모드 E2E 곡 생성 성공, Custom 모드 파라미터 검증 실패 시 거부 확인
 
 
-  - [ ] 2.2 편집 작업 (커버, 리페인트, 스템 추출, 레이어 추가, 곡 확장) 구현
+  - [x] 2.2 편집 작업 (커버, 리페인트, 스템 추출, 레이어 추가, 곡 확장) 구현
     - `task_type` 매핑: cover, repaint, extract, lego, complete
     - 커버 강도(0.0–1.0), 리페인트 구간 시각 검증
     - 업로드 검증: mp3/wav/flac, ≤600초, ≤50MB
@@ -127,7 +127,7 @@
     - _설계: §3.6_
     - **수용 기준**: 각 Edit_Task 유형별 요청→결과 저장→계보 기록 확인
 
-  - [ ] 2.3 가사 보조 및 파서/프린터 구현
+  - [x] 2.3 가사 보조 및 파서/프린터 구현
     - Lyrics_Assistant: ACE_Engine `/format_input` 연동, 보강 결과 반환
     - Lyrics_Parser/Printer: 왕복·멱등 속성 보장, 7개 섹션 + 사용자 정의 섹션
     - LRC_Parser/Printer: `[mm:ss.xx]` 형식, ±10ms 왕복, 정렬 불변식
@@ -135,7 +135,7 @@
     - _설계: §7.1–§7.3_
     - **수용 기준**: 왕복 PBT(100회), 멱등 PBT(100회), 행 개수 불변식 검증 통과
 
-  - [ ] 2.4 BGM_Service 구현 (배경음악 + 루프)
+  - [x] 2.4 BGM_Service 구현 (배경음악 + 루프)
     - 장면 설명(1–2000자), 목표 길이(5–600초) 검증
     - 인스트루멘털 파라미터 고정 처리
     - 루프 이음 연속성 검증: RMS 차이 ≤1.0dB, 샘플 단차 ≤5%, 양 끝 에너지, 마디 정합
@@ -146,7 +146,7 @@
     - **수용 기준**: 루프 자산 이음점 검증 통과, 강도 변형 라우드니스 차이 범위 확인
 
 
-  - [ ] 2.5 SFX_Service 구현 (텍스트 기반 효과음)
+  - [x] 2.5 SFX_Service 구현 (텍스트 기반 효과음)
     - Woosh_Adapter: Flow(고품질) / DFlow(고속) 연동
     - 프롬프트 검증(1자+, ≤77토큰), 목표 길이(0.1–10.0초), 변형 개수(1–8)
     - 모델 등급별 샘플링 단계 수 (고속 1–8, 고품질 8–100), 안내 척도(1.0–15.0)
@@ -156,7 +156,7 @@
     - _설계: §3.6, §5.4_
     - **수용 기준**: 동일 시드 재요청 시 샘플 동일, 정렬 점수 내림차순 정렬 확인
 
-  - [ ] 2.6 V2A_Service 구현 (영상 기반 폴리 효과음)
+  - [x] 2.6 V2A_Service 구현 (영상 기반 폴리 효과음)
     - 영상 검증: mp4/mov/webm, 0.5–60초, ≤200MB, 8–120fps, ≥128px
     - 24fps 표본화, 8초 구간 분할 + 50ms 교차 페이드 연결
     - 온셋 검출: 5ms 프레임 RMS, 직전 50ms 대비 6.0dB 증가
@@ -167,6 +167,7 @@
     - **수용 기준**: 온셋 정렬률 90% 이상 달성, 산출 오디오 길이 ±40ms 이내
 
   - [ ] 2.7 Speech_Service 및 Voice_Service 구현 (대사 생성, 음성 복제)
+    - **잔여**: Requirement 27의 전사 엔진 어댑터(설계 §13의 Transcription_Adapter)가 미구현이다. `Transcription_Service`와 `TranscriptionEnginePort`는 존재하나 포트를 구현하는 프로덕션 어댑터가 없어 `adapters/transcription/`이 비어 있고, Req 27.1의 전사 반환이 실제로 동작하지 않는다. Req 25·26 범위(대사 생성, Voice_Profile, 음성 변환)는 완료 상태다
     - TTS_Adapter: 2개+ 엔진 연동, 언어 코드 검증
     - 스크립트 분할(800자 기본, 행/문장 종결 위치), 50ms 교차 페이드 접합
     - 행 단위 타이밍 저장, 개별 행 재합성 (타이밍 재정렬)
@@ -181,8 +182,8 @@
 
 ## Phase 3: Audio Processing (DSP, 이펙트, 믹스다운)
 
-- [ ] 3. 오디오 처리 파이프라인 구현
-  - [ ] 3.1 DSP 기본 파이프라인 (리샘플링, 포맷 변환) 구현
+- [x] 3. 오디오 처리 파이프라인 구현
+  - [x] 3.1 DSP 기본 파이프라인 (리샘플링, 포맷 변환) 구현
     - Python Celery worker 셋업 (`musicstudio/dsp/src/`, 의존성은 `musicstudio/dsp/pyproject.toml`)
     - libsoxr VHQ 리샘플링 (48kHz 정규화, 오차 ≤±10ms)
     - pydub 기반 포맷 변환 (mp3, wav, flac, ogg)
@@ -192,7 +193,7 @@
     - **수용 기준**: 비-48kHz 입력 리샘플링 후 길이 오차 ≤10ms, 포맷 변환 무손실 확인
 
 
-  - [ ] 3.2 Effects_Service 구현 (이펙트 체인, 버전 관리)
+  - [x] 3.2 Effects_Service 구현 (이펙트 체인, 버전 관리)
     - pedalboard 8종 이펙트 (Chorus, Reverb, Delay, Compressor, Gain, HPF, LPF, PitchShift)
     - 각 이펙트 파라미터 범위 검증 (설계 §5.5, Req 29.2–29.8)
     - Effect_Chain JSON 직렬화: Chain_Parser/Chain_Printer, 왕복·멱등 보장
@@ -203,7 +204,7 @@
     - _설계: §5.5, §7.1_
     - **수용 기준**: 동일 입력+체인 2회 처리 → 샘플 차이 0, 왕복 PBT 통과, 체인 동등 관계 검증
 
-  - [ ] 3.3 Mastering_Assistant 구현 (라우드니스, 대사 정리, 자동 감쇠)
+  - [x] 3.3 Mastering_Assistant 구현 (라우드니스, 대사 정리, 자동 감쇠)
     - pyloudnorm: BS.1770-4 라우드니스 측정 (K-가중, 400ms 블록, 4× 오버샘플링 TP)
     - 라우드니스 정규화: 목표값(-30~-6 LUFS, 기본 -14), TP ≤-1.0dBTP 우선
     - 멱등 속성: 재적용 시 게인 변화 ≤0.1dB
@@ -214,7 +215,7 @@
     - _설계: §5.5, §11.3_
     - **수용 기준**: 라우드니스 정규화 멱등 PBT 통과, 대사 정리 후 발화 구간 라우드니스 ±1.0LUFS
 
-  - [ ] 3.4 Sound_Pack_Service 구현 (78개 UI 사운드 큐 일괄 생성)
+  - [x] 3.4 Sound_Pack_Service 구현 (78개 UI 사운드 큐 일괄 생성)
     - 78개 Semantic_Cue 병렬 생성 (동시 8개)
     - 원샷 72개(0.05–1.5초), 루프 6개(0.5–4.0초) 길이 검증
     - 팩 내 라우드니스 -25~-21 LUFS (400ms 창 측정)
@@ -230,7 +231,7 @@
 ## Phase 4: Timeline & Editing (타임라인, 믹스다운)
 
 - [ ] 4. 타임라인 및 믹스다운 구현
-  - [ ] 4.1 Timeline_Service 구현 (프로젝트, 클립, 되돌리기)
+  - [x] 4.1 Timeline_Service 구현 (프로젝트, 클립, 되돌리기)
     - Timeline_Project CRUD: 이름, 설명, 템포(30–300 BPM), 박자(2/3/4/6)
     - Timeline_Clip 관리: 추가, 이동, 트리밍, 분할, 복제, 삭제
     - 트랙 0–31, 클립 상한 500, 동일 트랙 겹침 방지
@@ -305,7 +306,7 @@
 ## Phase 6: Safety, Consent, Licensing (안전, 동의, 라이선스)
 
 - [ ] 6. 안전·동의·라이선스 구현
-  - [ ] 6.1 Moderation_Service 구현 (콘텐츠 정책 검사)
+  - [x] 6.1 Moderation_Service 구현 (콘텐츠 정책 검사)
     - 캡션·가사·스크립트 정책 검사 파이프라인
     - 실존 아티스트명 → 스타일 서술 대체 + 알림
     - 업로드 권리 동의 요구, 대사 사칭 차단
@@ -316,7 +317,7 @@
     - **수용 기준**: 정책 위반 입력 차단 + 크레딧 불변 확인, 신고→검토대기→피드 제외 흐름
 
 
-  - [ ] 6.2 Voice_Consent_Record 및 동의 철회 상태 머신 구현
+  - [x] 6.2 Voice_Consent_Record 및 동의 철회 상태 머신 구현
     - 동의 기록: 화자 본인 여부, 명시적 허가, 금지 용도 확약, 화자 관계 구분
     - 6개 금지 용도 분류 검사 (사칭, 인증 우회, 사기, 괴롭힘, 성적, 오해 유발)
     - 2단계 동의 철회 상태 머신: 정상→잠정 사용 제한(24h 내)→사용 중지(14일 내)
