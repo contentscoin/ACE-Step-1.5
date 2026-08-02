@@ -54,6 +54,8 @@ import {
 } from '../parse-error';
 
 import { TRACK_COUNT } from './bounds';
+import { parseChainValue } from '../effects/chain-parser';
+import type { EffectChain } from '../effects/chain';
 import {
   projectViolations,
   type TimelineClip,
@@ -260,7 +262,20 @@ function toClip(record: Record<string, unknown>): TimelineClip {
     fadeInMs: asNumber(record['fadeInMs']),
     fadeOutMs: asNumber(record['fadeOutMs']),
     muted: asBoolean(record['muted']),
+    // Requirement 29.31. Absent and `null` both mean "no chain"; anything else is handed to
+    // `parseChainValue`, and a chain it rejects arrives as a malformed value that
+    // `clipViolations` reports through `clip_effect_chain_invalid`. Parsing here rather than
+    // coercing keeps the rule in one place, as the header says.
+    effectChain: toEffectChain(record['effectChain']),
   };
+}
+
+function toEffectChain(value: unknown): EffectChain | null {
+  if (value === undefined || value === null) return null;
+  const parsed = parseChainValue(value);
+  // A rejected chain becomes an empty one, which `chainViolations` then reports as
+  // `chain_too_few_items`. Returning `null` instead would silently accept the document.
+  return parsed.ok ? parsed.value : { items: [] };
 }
 
 function toTrack(record: Record<string, unknown>): TrackSettings {

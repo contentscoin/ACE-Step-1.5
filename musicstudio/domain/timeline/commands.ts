@@ -432,6 +432,10 @@ export function planAddClip(project: TimelineProject, request: AddClipRequest): 
   }
 
   const clip: TimelineClip = {
+    // Requirement 29.31's chain is attached to an existing clip, never at add time: the
+    // twelve edit operations of Requirement 28.23 contain no "set clip effects", so a clip
+    // starts with none and a chain arrives through the project document.
+    effectChain: null,
     id: request.clipId,
     assetId: request.assetId,
     sourceDurationMs: request.sourceDurationMs,

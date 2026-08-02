@@ -36,6 +36,7 @@
  * wins. See `project.ts`.
  */
 
+import { chainToDocument, type EffectItemDocument } from '../effects/chain-printer';
 import {
   TIMELINE_CLIP_FIELDS,
   TRACK_SETTINGS_FIELDS,
@@ -57,6 +58,15 @@ export interface TimelineClipDocument {
   readonly fadeInMs: number;
   readonly fadeOutMs: number;
   readonly muted: boolean;
+  /**
+   * Requirement 29.31's chain, written last and always present.
+   *
+   * `null` rather than an omitted key when the clip has none, so that Property 7's
+   * byte-identical requirement does not depend on whether a clip ever carried a chain: a
+   * key that appears for some clips and not others would make the document's shape a
+   * function of the project's history.
+   */
+  readonly effectChain: readonly EffectItemDocument[] | null;
 }
 
 export interface TrackSettingsDocument {
@@ -110,6 +120,10 @@ function clipToDocument(clip: TimelineClip): TimelineClipDocument {
     fadeInMs: clip.fadeInMs,
     fadeOutMs: clip.fadeOutMs,
     muted: clip.muted,
+    // Through `chainToDocument` rather than by writing the chain out here, so the clip's
+    // chain and a standalone one (Requirement 29.24) serialise through one printer and
+    // cannot drift into two spellings of the same chain.
+    effectChain: clip.effectChain === null ? null : chainToDocument(clip.effectChain),
   };
 }
 
@@ -160,5 +174,12 @@ export function printProjectPretty(project: TimelineProject): string {
 }
 
 /** The declared field order, for the parity test. Keeps two lists from drifting silently. */
-export const CLIP_DOCUMENT_FIELDS = TIMELINE_CLIP_FIELDS;
+/**
+ * The clip document's key order: Requirement 28.32's fields, then the chain.
+ *
+ * The chain is appended rather than folded into `TIMELINE_CLIP_FIELDS` because that list is
+ * what the equivalence relation iterates with `!==`, and a chain cannot be compared that
+ * way. The relation handles it separately, under design §7.1's chain equivalence relation.
+ */
+export const CLIP_DOCUMENT_FIELDS = [...TIMELINE_CLIP_FIELDS, 'effectChain'] as const;
 export const TRACK_DOCUMENT_FIELDS = TRACK_SETTINGS_FIELDS;

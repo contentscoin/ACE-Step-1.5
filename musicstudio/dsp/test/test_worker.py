@@ -24,6 +24,7 @@ from musicstudio_dsp.audio_buffer import AudioBuffer
 from musicstudio_dsp.formats import decode, encode
 from musicstudio_dsp.resample import INTERNAL_SAMPLE_RATE
 from musicstudio_dsp.effects import pedalboard_available
+from musicstudio_dsp.mixdown_clip import MixdownError
 from musicstudio_dsp.worker import (
     apply_effect_chain_task,
     celery_app,
@@ -35,6 +36,7 @@ from musicstudio_dsp.worker import (
     measure_loudness_task,
     normalise_for_storage_task,
     normalise_loudness_task,
+    render_mixdown_task,
 )
 
 TASK_NAMES = (
@@ -49,6 +51,8 @@ TASK_NAMES = (
     # Task 3.4's sound-pack shells (Requirements 24.7, 24.9, 24.10, 24.11).
     "musicstudio_dsp.cue_pack_similarity",
     "musicstudio_dsp.export_sound_pack",
+    # Task 4.2's mixdown shell (Requirements 28.24-28.29).
+    "musicstudio_dsp.render_mixdown",
 )
 
 
@@ -74,6 +78,7 @@ class TestApplication:
         assert duck_task.name == TASK_NAMES[6]
         assert cue_pack_similarity_task.name == TASK_NAMES[7]
         assert export_sound_pack_task.name == TASK_NAMES[8]
+        assert render_mixdown_task.name == TASK_NAMES[9]
 
     def test_registers_no_task_this_tuple_does_not_name(self) -> None:
         # The tuple is exhaustive on purpose: a task added without extending it would be a
@@ -442,3 +447,62 @@ class TestExportSoundPackTask:
         import json
 
         json.dumps(export_sound_pack_task.run([self.cue("drop", 830)], "{}"))
+
+
+class TestRenderMixdownTask:
+    """Task 4.2's shell — Requirements 28.24-28.29.
+
+    The arithmetic is ``test_mixdown.py``'s; what is checked here is the crossing:
+    that base64 audio decodes into clips, that a string-keyed track map reaches the
+    renderer as integer indices, and that the attenuation of 28.24 and 28.28 survives
+    into the response the `mix` asset's metadata is built from.
+    """
+
+    @staticmethod
+    def _clip(clip_id: str, start_time_ms: int, track: int, amplitude: float = 0.2) -> dict:
+        frames = INTERNAL_SAMPLE_RATE // 10
+        t = np.arange(frames, dtype=np.float64) / float(INTERNAL_SAMPLE_RATE)
+        wave = (amplitude * np.sin(2.0 * np.pi * 440.0 * t)).astype(np.float32)
+        audio = AudioBuffer.from_channels(INTERNAL_SAMPLE_RATE, [wave])
+        return {
+            "clip_id": clip_id,
+            "audio_base64": base64.b64encode(encode(audio, "flac")).decode("ascii"),
+            "start_time_ms": start_time_ms,
+            "track": track,
+        }
+
+    def test_renders_the_target_clips_into_one_audio(self) -> None:
+        result = render_mixdown_task(
+            [self._clip("a", 0, 0), self._clip("b", 100, 1)]
+        )
+
+        assert result["sample_rate"] == INTERNAL_SAMPLE_RATE
+        assert result["channels"] == 2
+        # 0 ms + 100 ms of clip, then 100 ms start + 100 ms of clip -> 200 ms.
+        assert abs(result["duration_ms"] - 200.0) <= 10.0
+        assert decode(base64.b64decode(result["audio_base64"])).frame_count == result["frame_count"]
+
+    def test_reports_zero_attenuation_when_the_sum_fits(self) -> None:
+        result = render_mixdown_task([self._clip("a", 0, 0)])
+        assert result["attenuation_db"] == 0.0
+        assert result["peak_before"] <= 1.0
+
+    def test_reports_the_attenuation_when_it_had_to_scale_down(self) -> None:
+        clips = [self._clip(f"c{index}", 0, index, amplitude=0.9) for index in range(4)]
+        result = render_mixdown_task(clips)
+
+        assert result["peak_before"] > 1.0
+        assert result["attenuation_db"] > 0.0
+        assert 0.99 <= result["peak_after"] <= 1.0
+
+    def test_track_settings_arrive_through_string_keys(self) -> None:
+        clips = [self._clip("a", 0, 2)]
+        plain = render_mixdown_task(clips)
+        quiet = render_mixdown_task(clips, tracks={"2": {"volume_db": -12.0}})
+
+        assert quiet["peak_before"] < plain["peak_before"]
+
+    def test_refuses_a_render_with_no_target_clips(self) -> None:
+        with pytest.raises(MixdownError) as caught:
+            render_mixdown_task([])
+        assert caught.value.reason == "no_render_target"

@@ -37,6 +37,7 @@
  */
 
 import { PROJECT_GAIN_TOLERANCE_DB, PROJECT_PAN_TOLERANCE } from './bounds';
+import { chainsEquivalent } from '../effects/equivalence';
 import {
   TIMELINE_CLIP_FIELDS,
   TRACK_SETTINGS_FIELDS,
@@ -116,6 +117,28 @@ export function timelineClipsEquivalent(
     if (leftValue !== rightValue) {
       return differs(`${where} ${field} ${String(leftValue)} !== ${String(rightValue)}`);
     }
+  }
+
+  // Requirement 29.31's chain, compared by design §7.1's *chain equivalence relation*
+  // rather than by identity.
+  //
+  // It is not one of the fields Requirement 28.32 enumerates, and it is compared anyway:
+  // without it a printer that dropped every chain would still satisfy Property 6, which
+  // would make the round trip a weaker statement than it reads as. `!==` is the wrong test
+  // — two structurally identical chains from a parse are different objects — and the chain
+  // relation is the one the spec already defines for exactly this comparison.
+  if ((left.effectChain === null) !== (right.effectChain === null)) {
+    return differs(
+      `${where} effectChain ${left.effectChain === null ? 'absent' : 'present'} vs ` +
+        `${right.effectChain === null ? 'absent' : 'present'}`,
+    );
+  }
+  if (
+    left.effectChain !== null &&
+    right.effectChain !== null &&
+    !chainsEquivalent(left.effectChain, right.effectChain)
+  ) {
+    return differs(`${where} effectChain differs under the chain equivalence relation`);
   }
 
   return EQUIVALENT;

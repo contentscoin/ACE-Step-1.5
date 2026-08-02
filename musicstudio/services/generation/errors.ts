@@ -143,7 +143,26 @@ export type GenerationErrorCode =
   /** Requirement 28.34 — a clip referencing an Audio_Asset that does not exist. */
   | 'timeline_asset_not_found'
   /** Requirement 28.31 — a JSON project document that could not be parsed. */
-  | 'timeline_project_document_invalid';
+  | 'timeline_project_document_invalid'
+  /**
+   * Requirement 28.29's 렌더링 대상 부재 사유 코드.
+   *
+   * Its own code rather than a `timeline_edit_rejected` payload: the caller asked to render,
+   * not to edit, and 28.29 requires the project to be left untouched — a client that saw an
+   * edit rejection would have to guess whether anything had been written.
+   */
+  | 'mixdown_no_render_target'
+  /** Requirement 28.24 — a clip whose Audio_Asset has no stored audio to mix. */
+  | 'mixdown_audio_unavailable'
+  /**
+   * The worker returned a render that breaks an invariant the caller stated — a length
+   * outside Requirement 28.25's ±10 ms, or an attenuation outside 28.28's band.
+   *
+   * Separate from the refusals above because it is not the caller's fault and not
+   * retryable by changing the request: the two sides of the seam have drifted. Rendered
+   * as 502 for the same reason.
+   */
+  | 'mixdown_render_invalid';
 
 export class GenerationError extends Error {
   readonly statusCode: number;
