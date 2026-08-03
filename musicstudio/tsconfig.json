@@ -35,7 +35,8 @@
     "adapters/**/*.ts",
     "domain/**/*.ts",
     "db/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "scripts/**/*.ts"
   ],
   "exclude": ["node_modules", "build", "web", "dsp"]
 }

@@ -1,0 +1,49 @@
+@import 'tailwindcss';
+
+/**
+ * Requirement 31.14 — the focus indicator.
+ *
+ * Drawn with `outline` rather than a `box-shadow` or a positioned pseudo-element, because an
+ * outline follows the element's own border box: while a component animates its transform, the ring
+ * transforms with it, and the criterion's 2 CSS-pixel boundary difference stays at zero rather than
+ * being a number to measure. `outline-offset` is the only gap, and it is the same on all sides.
+ *
+ * `:focus-visible`, not `:focus`, so a pointer click does not leave a ring on a surface the user
+ * is already looking at — which is what makes a keyboard user's ring meaningful.
+ */
+:root {
+  color-scheme: light dark;
+}
+
+*:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/**
+ * Requirement 31.9's belt-and-braces.
+ *
+ * The decision lives in `transitionFor`, and this is the safety net for anything that animates via
+ * CSS rather than Motion — a third-party stylesheet, a `:hover` transition someone adds later.
+ * Decorative CSS animation stops; the components React drives keep their own 200 ms budget.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Pretendard',
+    sans-serif;
+}

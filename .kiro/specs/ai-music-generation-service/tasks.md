@@ -348,7 +348,7 @@
 ## Phase 7: Frontend & Design System (프런트엔드, 디자인 시스템)
 
 - [ ] 7. 프런트엔드 및 디자인 시스템 구현
-  - [ ] 7.1 React SPA 보일러플레이트 및 Amicro 모션 시스템 셋업
+  - [x] 7.1 React SPA 보일러플레이트 및 Amicro 모션 시스템 셋업
     - Vite 6 + React 19 + Tailwind CSS 4 + Motion 12 프로젝트 구성 (`musicstudio/web/`)
     - Amicro 레지스트리 버전 태그 고정 설치
     - Amicro_Motion_Preset 5종(`snappy`/`bouncy`/`smooth`/`gentle`/`stiff`) 참조 강제

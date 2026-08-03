@@ -118,6 +118,42 @@ jobs:
       - name: Test (vitest + fast-check)
         run: npm test -- --shard=${{ matrix.shard }}/4
 
+  # Task 7.1's web SPA. A separate job because it has its own lockfile and its own
+  # toolchain (design §1.4.2), and because the motion check of Requirement 31.5 must
+  # be a gate rather than something a developer remembers to run: a spring literal
+  # has to fail CI for "빌드 산출물을 생성하지 않는다" to mean anything.
+  #
+  # `npm run build` runs the check, then `tsc --noEmit`, then Vite — so this one step
+  # covers 31.5's gate and 31.15's offline build together. The runner has a network,
+  # so the offline half is a property of the build *script* (nothing fetches) rather
+  # than of the runner; `web/src/components/amicro/README.md` records why.
+  web:
+    name: Web (motion check + tests + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: musicstudio/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: musicstudio/web/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci || npm install
+
+      - name: Motion preset static check (Requirement 31.5)
+        run: npm run check:motion
+
+      - name: Test (vitest)
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   dsp:
     name: DSP worker (pytest + hypothesis)
     runs-on: ubuntu-latest
