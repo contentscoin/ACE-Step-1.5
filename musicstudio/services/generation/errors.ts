@@ -229,7 +229,18 @@ export type GenerationErrorCode =
   /** Requirement 15.5 — the persona exists but is not trained, so there is no adapter. */
   | 'persona_not_ready'
   /** Requirement 15.1 — a reference song that is missing or not the requester's. */
-  | 'persona_reference_invalid';
+  | 'persona_reference_invalid'
+  /**
+   * Requirements 33.11, 33.22 — a `commercial` request against a non-commercially-licensed
+   * asset. 403 rather than 402: 402 would read as "pay and this works", and 33.22 makes it
+   * precisely the case that no plan, tier, operator setting or API key changes the answer.
+   */
+  | 'commercial_use_not_permitted'
+  | 'licensing_asset_not_found'
+  /** Requirement 33.10 — a non-commercial engine chosen without confirming the notice. */
+  | 'non_commercial_notice_not_confirmed'
+  /** Requirement 33.24 — nothing registered for this Asset_Kind permits commercial use. */
+  | 'no_commercial_engine_available';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

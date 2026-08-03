@@ -31,6 +31,7 @@ import {
   MIXDOWN_ENGINE_ID,
   type MixdownAssetWriter,
   type MixdownAudioLocator,
+  type MixdownCommercialUsePort,
   type MixdownClipRequest,
   type MixdownRenderParams,
   type MixdownRenderPort,
@@ -78,6 +79,14 @@ export interface MixdownRendererOptions {
   readonly assets: MixdownAssetWriter;
   /** Requirement 2.12. The `mix` price row lives in `services/credit/pricing-table.ts`. */
   readonly credits: MixdownCreditPort;
+  /**
+   * Requirement 33.12.
+   *
+   * Optional so a test about Requirement 28 alone composes without it — and when it is absent
+   * the caller's own `provenance.commercialUseAllowed` stands, which is the conservative
+   * reading: an unwired renderer cannot *widen* permission, only fail to narrow it.
+   */
+  readonly commercialUse?: MixdownCommercialUsePort;
 }
 
 /**
@@ -119,7 +128,23 @@ export function mixdownAudioUnavailable(assetId: string, clipId: string): Genera
 }
 
 export function createMixdownRenderer(options: MixdownRendererOptions) {
-  const { store, render, audio, assets, credits } = options;
+  const { store, render, audio, assets, credits, commercialUse } = options;
+
+  /**
+   * Requirement 33.12: false if any participating asset is false.
+   *
+   * A participant the port does not answer for is treated as not permitted — an unknown
+   * provenance can never widen permission, the same rule `propagateCommercialUse` applies.
+   */
+  async function foldCommercialUse(
+    provenance: AssetProvenance,
+    participantIds: readonly string[],
+  ): Promise<boolean> {
+    if (!provenance.commercialUseAllowed) return false;
+    if (commercialUse === undefined) return provenance.commercialUseAllowed;
+    const flags = await commercialUse.commercialUseAllowedFor(participantIds);
+    return participantIds.every((assetId) => flags.get(assetId) === true);
+  }
 
   return {
     async renderProject(request: MixdownRequest): Promise<MixdownResponse> {
@@ -151,6 +176,8 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
       // Requirement 2.12, before the asset is written: a charge that failed after the asset
       // existed would leave a stored mix nobody paid for, and the asset is the artefact a
       // user can act on. The engine identifier is the one the price row is keyed by.
+      const participantIds = [...new Set(plan.target.clips.map((clip) => clip.assetId))];
+
       const charge = await credits.chargeMixdown({
         accountId: request.ownerId,
         jobId: request.jobId,
@@ -168,8 +195,13 @@ export function createMixdownRenderer(options: MixdownRendererOptions) {
         channels: result.channels,
         // Requirement 28.28: recorded on the asset, not only in the response.
         attenuationDb: result.attenuationDb,
-        provenance: { ...request.provenance, engineId: MIXDOWN_ENGINE_ID },
-        sourceAssetIds: [...new Set(plan.target.clips.map((clip) => clip.assetId))],
+        provenance: {
+          ...request.provenance,
+          engineId: MIXDOWN_ENGINE_ID,
+          // Requirement 33.12: a mix is permitted only if every participating asset is.
+          commercialUseAllowed: await foldCommercialUse(request.provenance, participantIds),
+        },
+        sourceAssetIds: participantIds,
       });
 
       return {

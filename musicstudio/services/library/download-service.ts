@@ -6,9 +6,20 @@
  * different question from the ones Requirement 11 asks.
  *
  * The order of the checks is the order the requirements are written in, and it matters:
- * ownership (11.9) before format (13.2/13.9) before entitlement (13.4). Checking the plan
- * first would tell a user their plan is insufficient for a download of someone else's
- * asset, which is both wrong and a disclosure.
+ * ownership (11.9) before format (13.2/13.9) before entitlement (13.4) before commercial use
+ * (33.11). Checking the plan first would tell a user their plan is insufficient for a download
+ * of someone else's asset, which is both wrong and a disclosure.
+ *
+ * ### Where Requirement 33 sits in that order, and why it is last
+ *
+ * The commercial-use gate runs **after** the plan check, and that is not arbitrary. A refusal
+ * naming a plan is actionable by upgrading; a commercial-use refusal is not actionable at all in
+ * that direction — Requirement 33.22 fixes it against plan, tier, operator setting and API key.
+ * Reporting the licence refusal first would leave a user who *also* lacks the lossless
+ * entitlement upgrading their plan and hitting the same wall.
+ *
+ * The credits file of Requirement 33.9 is attached **unconditionally**, whatever the purpose:
+ * upstream attribution obligations do not depend on what the user does next.
  */
 
 import {
@@ -19,6 +30,8 @@ import {
   type DownloadFormat,
 } from '../../domain/library/download';
 import { PLANS, findPlan } from '../../domain/credit/plan';
+import type { UsagePurpose } from '../../domain/licensing/usage-purpose';
+import type { AttributionFile, LicensingService } from '../licensing/licensing-service';
 import { libraryAudioUnavailable, libraryDownloadRefused } from './errors';
 import type {
   DownloadConversionPort,
@@ -36,6 +49,14 @@ export interface DownloadServiceOptions {
   readonly plans: PlanEntitlementPort;
   /** The shared ownership gate from `createLibraryService`. */
   readonly loadOwned: (ownerId: string, assetId: string) => Promise<LibraryAssetRecord>;
+  /**
+   * Requirements 33.9, 33.11, 33.19.
+   *
+   * Optional so the service composes without it in tests that are about Requirement 13 alone —
+   * but a deployment without it silently loses the commercial gate, so `index.ts` wires it and
+   * `test/unit/licensing/download-integration.test.ts` checks the wired path.
+   */
+  readonly licensing?: LicensingService;
 }
 
 export interface DownloadResult {
@@ -43,6 +64,10 @@ export interface DownloadResult {
   readonly format: DownloadFormat;
   readonly bytes: Uint8Array;
   readonly sampleRate: number;
+  /** Requirement 33.19: exactly one of two values, on every download. */
+  readonly usagePurpose: UsagePurpose;
+  /** Requirement 33.9: the credits, beside the audio. Absent only when unwired. */
+  readonly attribution?: AttributionFile;
 }
 
 export interface StemArchiveResult {
@@ -57,7 +82,7 @@ export function losslessPlanIds(): readonly string[] {
 }
 
 export function createDownloadService(options: DownloadServiceOptions) {
-  const { assets, conversion, archive, plans, loadOwned } = options;
+  const { assets, conversion, archive, plans, loadOwned, licensing } = options;
 
   async function losslessEntitled(accountId: string): Promise<boolean> {
     const planId = await plans.planIdFor(accountId);
@@ -76,6 +101,8 @@ export function createDownloadService(options: DownloadServiceOptions) {
       ownerId: string,
       assetId: string,
       format: unknown,
+      /** Requirement 33.19. Absent means `non_commercial`; the service parses, not the caller. */
+      usagePurposeValue?: unknown,
     ): Promise<DownloadResult> {
       const record = await loadOwned(ownerId, assetId);
 
@@ -98,6 +125,15 @@ export function createDownloadService(options: DownloadServiceOptions) {
         });
       }
 
+      // Requirements 33.11, 33.19, 33.22, 33.23 — last, and after the plan check. See header.
+      // Throws on refusal, so nothing below runs and no audio is fetched for a request that
+      // will not be served.
+      const purpose =
+        licensing === undefined
+          ? 'non_commercial'
+          : (await licensing.assertCommercialUseAllowed(ownerId, assetId, usagePurposeValue))
+              .usagePurpose;
+
       // The ruling only returns `allowed` for a value it has already narrowed.
       const chosen = format as DownloadFormat;
       const payload = await fetchAudio(record, chosen);
@@ -109,6 +145,11 @@ export function createDownloadService(options: DownloadServiceOptions) {
         bytes: payload.bytes,
         // Requirement 13.10, reported from what the worker returned rather than assumed.
         sampleRate: payload.sampleRate,
+        usagePurpose: purpose,
+        // Requirement 33.9 — unconditional, whatever the purpose.
+        ...(licensing === undefined
+          ? {}
+          : { attribution: await licensing.attributionFileFor(assetId) }),
       };
     },
 
