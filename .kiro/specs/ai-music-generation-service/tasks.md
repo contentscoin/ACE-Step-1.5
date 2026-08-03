@@ -412,7 +412,7 @@
     - **수용 기준**: 큐 80% 초과 시 경보 발송, 로그에 PII 미노출 확인
 
 
-  - [ ] 8.2 Admin_Console 및 Quality_Threshold_Set 구현
+  - [x] 8.2 Admin_Console 및 Quality_Threshold_Set 구현
     - 운영 현황 대시보드: 대기/진행/성공/실패 작업 수, 평균 소요시간
     - 엔진별 현황: 대기 작업, 15분 실패율, 일일 쿼터 잔량, 상태 점검 이력
     - Asset_Kind별 24시간 생성 개수/평균 소요시간

@@ -240,7 +240,13 @@ export type GenerationErrorCode =
   /** Requirement 33.10 — a non-commercial engine chosen without confirming the notice. */
   | 'non_commercial_notice_not_confirmed'
   /** Requirement 33.24 — nothing registered for this Asset_Kind permits commercial use. */
-  | 'no_commercial_engine_available';
+  | 'no_commercial_engine_available'
+  /** Requirements 18.1, 34.9 — the Admin_Console and the thresholds are operator-only. */
+  | 'operator_role_required'
+  /** Requirement 34.5 — carries the adjustable range; the stored value is unchanged. */
+  | 'quality_threshold_out_of_range'
+  /** Requirement 18.9 — diagnostics for a job that does not exist. */
+  | 'admin_job_not_found';
 
 export class GenerationError extends Error {
   readonly statusCode: number;
