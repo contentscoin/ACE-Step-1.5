@@ -398,7 +398,7 @@
 ## Phase 8: Observability & Operations (관측성, 운영)
 
 - [ ] 8. 관측성 및 운영 도구 구현
-  - [ ] 8.1 구조화 로그 및 경보 시스템 구현
+  - [x] 8.1 구조화 로그 및 경보 시스템 구현
     - 모든 Generation_Job 구조화 로그: request_id, user_id, engine_id, model_name, duration_ms 등
     - 경보 조건 구현:
       - ACE_Engine 큐 사용률 ≥80%
