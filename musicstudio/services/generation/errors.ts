@@ -162,7 +162,91 @@ export type GenerationErrorCode =
    * retryable by changing the request: the two sides of the seam have drifted. Rendered
    * as 502 for the same reason.
    */
-  | 'mixdown_render_invalid';
+  | 'mixdown_render_invalid'
+  /** Requirements 11.1, 11.9 — no such Audio_Asset, or one this account does not own. */
+  | 'library_asset_not_found'
+  | 'library_asset_forbidden'
+  /** Requirements 11.2-11.4, 11.12 — a listing request the library cannot answer. */
+  | 'library_query_invalid'
+  /** Requirement 11.3's tag rules, carrying every violated tag rather than the first. */
+  | 'library_tags_invalid'
+  /** Requirement 11.10 — no such playlist, or one this account does not own. */
+  | 'library_playlist_not_found'
+  | 'library_playlist_forbidden'
+  | 'library_playlist_invalid'
+  /**
+   * Requirements 13.2, 13.4, 13.9 — the download was refused.
+   *
+   * One code for the three, because a client acts on the payload: `offeredFormats` for a
+   * format that is not on offer, `requiredPlanIds` for 13.4's "필요한 요금제". Splitting
+   * them would make a client branch on a code to read a field it can just look for.
+   */
+  | 'library_download_refused'
+  /** The asset exists but its audio does not — purged, or never stored. */
+  | 'library_audio_unavailable'
+  /** Requirement 12.1 — no such Audio_Asset to play. */
+  | 'playback_asset_not_found'
+  /**
+   * Requirement 12.6 — a private asset, and the requester is not its owner.
+   *
+   * 404 rather than 403, unlike Requirement 11.9's library refusal. 11.9 states its status
+   * for an owner acting on their own library, where existence is already known. A stream
+   * URL is guessable and reachable without a session, so answering 403 would confirm that
+   * a private asset exists to anyone who asked. The requirement fixes neither code.
+   */
+  | 'playback_asset_private'
+  /** Requirement 12.2 — the requested byte range does not overlap the object. */
+  | 'playback_range_unsatisfiable'
+  /** The asset exists but its audio does not, so there is nothing to stream. */
+  | 'playback_audio_unavailable'
+  /** Requirement 12.7 — a bucket count outside the permitted range. */
+  | 'playback_waveform_request_invalid'
+  /**
+   * Requirement 14.4 — the share link names nothing published.
+   *
+   * The single answer for four different states: never published, revoked, soft-deleted, or
+   * withheld by review. 14.4 fixes 404 for the revoked case, and answering anything more
+   * specific for the others would tell a stranger holding a stale link which one it is.
+   */
+  | 'sharing_link_not_found'
+  /** Requirements 14.2, 14.4 — publishing or revoking someone else's asset. 403 per 11.9. */
+  | 'sharing_asset_forbidden'
+  | 'sharing_asset_not_found'
+  /** Requirement 14.7 — a like on an asset that is not public. */
+  | 'sharing_asset_not_public'
+  /** Requirement 14.9 — the owner did not permit remote remixing. */
+  | 'sharing_remix_not_permitted'
+  /** Requirements 14.5, 14.6 — a malformed feed query. */
+  | 'sharing_feed_query_invalid'
+  /** Requirement 14.11 — no such Sound_Pack, or it belongs to another account. */
+  | 'sharing_sound_pack_not_found'
+  | 'sharing_sound_pack_forbidden'
+  /** Requirements 15.2, 15.8 — the training request is refused; carries the minimum. */
+  | 'persona_request_invalid'
+  | 'persona_not_found'
+  /** Requirement 15.6 — a persona the requester does not own. 403, stated by the criterion. */
+  | 'persona_forbidden'
+  /** Requirement 15.5 — the persona exists but is not trained, so there is no adapter. */
+  | 'persona_not_ready'
+  /** Requirement 15.1 — a reference song that is missing or not the requester's. */
+  | 'persona_reference_invalid'
+  /**
+   * Requirements 33.11, 33.22 — a `commercial` request against a non-commercially-licensed
+   * asset. 403 rather than 402: 402 would read as "pay and this works", and 33.22 makes it
+   * precisely the case that no plan, tier, operator setting or API key changes the answer.
+   */
+  | 'commercial_use_not_permitted'
+  | 'licensing_asset_not_found'
+  /** Requirement 33.10 — a non-commercial engine chosen without confirming the notice. */
+  | 'non_commercial_notice_not_confirmed'
+  /** Requirement 33.24 — nothing registered for this Asset_Kind permits commercial use. */
+  | 'no_commercial_engine_available'
+  /** Requirements 18.1, 34.9 — the Admin_Console and the thresholds are operator-only. */
+  | 'operator_role_required'
+  /** Requirement 34.5 — carries the adjustable range; the stored value is unchanged. */
+  | 'quality_threshold_out_of_range'
+  /** Requirement 18.9 — diagnostics for a job that does not exist. */
+  | 'admin_job_not_found';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

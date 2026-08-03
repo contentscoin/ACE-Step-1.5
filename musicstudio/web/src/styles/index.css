@@ -1,0 +1,82 @@
+@import 'tailwindcss';
+
+/**
+ * Requirement 31.14 — the focus indicator.
+ *
+ * Drawn with `outline` rather than a `box-shadow` or a positioned pseudo-element, because an
+ * outline follows the element's own border box: while a component animates its transform, the ring
+ * transforms with it, and the criterion's 2 CSS-pixel boundary difference stays at zero rather than
+ * being a number to measure. `outline-offset` is the only gap, and it is the same on all sides.
+ *
+ * `:focus-visible`, not `:focus`, so a pointer click does not leave a ring on a surface the user
+ * is already looking at — which is what makes a keyboard user's ring meaningful.
+ *
+ * The offset is `--focus-ring-offset` rather than a literal, because it **is** the boundary
+ * difference Requirement 31.14 bounds at 2 px: an outline paints on the element's own border box,
+ * so the offset is the whole of the gap, in every frame, however the element is animating.
+ * `src/a11y/focus.ts` holds the same number and `test/a11y/focus.test.ts` asserts the two agree —
+ * raising this for looks without noticing is precisely how the criterion goes quietly false.
+ */
+/**
+ * The palette `src/styles/ui.ts` spends.
+ *
+ * Custom properties rather than two sets of style objects, because the light and dark schemes then
+ * differ in one place instead of at every `background:` in the app — and because a component that
+ * writes `var(--surface)` cannot be the thing that gets one of the two schemes wrong.
+ *
+ * `light-dark()` rather than a `prefers-color-scheme` block: the pairs stay written together, so a
+ * colour added to one scheme cannot be forgotten in the other. It is Baseline-available and the
+ * `color-scheme` declaration below is what activates it.
+ */
+:root {
+  color-scheme: light dark;
+
+  --ink: light-dark(#16181d, #e9ecf1);
+  --surface: light-dark(#ffffff, #14161b);
+  --field: light-dark(#f4f5f8, #1c1f26);
+  --line: light-dark(#d9dce3, #2f343e);
+  --accent: light-dark(#3b5bdb, #7c93f5);
+  --accent-ink: light-dark(#ffffff, #0d1017);
+  --danger: light-dark(#c0392b, #f08a80);
+  --danger-surface: light-dark(#fdf2f0, #2a1a18);
+
+  /* Requirement 31.14. Mirrored by FOCUS_RING_OFFSET_PX / FOCUS_RING_WIDTH_PX in a11y/focus.ts. */
+  --focus-ring-offset: 2px;
+  --focus-ring-width: 2px;
+
+  background: light-dark(#fbfbfd, #0d0f13);
+  color: var(--ink);
+}
+
+*:focus-visible {
+  outline: var(--focus-ring-width) solid currentColor;
+  outline-offset: var(--focus-ring-offset);
+}
+
+/**
+ * Requirement 31.9's belt-and-braces.
+ *
+ * The decision lives in `transitionFor`, and this is the safety net for anything that animates via
+ * CSS rather than Motion — a third-party stylesheet, a `:hover` transition someone adds later.
+ * Decorative CSS animation stops; the components React drives keep their own 200 ms budget.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Pretendard',
+    sans-serif;
+}

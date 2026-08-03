@@ -16,3 +16,8 @@ dsp/.pytest_cache/
 dsp/.hypothesis/
 dsp/*.egg-info/
 dsp/src/*.egg-info/
+
+# Web SPA (task 7.1). `web/package-lock.json` is committed for the same reason the
+# product layer's is: CI installs must be reproducible.
+web/node_modules/
+web/dist/

@@ -106,7 +106,7 @@
 
 ## Phase 2: Core Generation (곡, BGM, SFX, 대사, V2A)
 
-- [ ] 2. 생성 서비스 구현
+- [x] 2. 생성 서비스 구현
   - [x] 2.1 ACE_Engine_Adapter 및 Simple/Custom 모드 곡 생성
     - ACE_Engine HTTP API 연동 어댑터 (submit, poll, fetchResult)
     - Simple_Mode: `sample_mode=true`, `thinking=true`, 설명 1–2000자 검증
@@ -166,8 +166,8 @@
     - _설계: §5.4_
     - **수용 기준**: 온셋 정렬률 90% 이상 달성, 산출 오디오 길이 ±40ms 이내
 
-  - [ ] 2.7 Speech_Service 및 Voice_Service 구현 (대사 생성, 음성 복제)
-    - **잔여**: Requirement 27의 전사 엔진 어댑터(설계 §13의 Transcription_Adapter)가 미구현이다. `Transcription_Service`와 `TranscriptionEnginePort`는 존재하나 포트를 구현하는 프로덕션 어댑터가 없어 `adapters/transcription/`이 비어 있고, Req 27.1의 전사 반환이 실제로 동작하지 않는다. Req 25·26 범위(대사 생성, Voice_Profile, 음성 변환)는 완료 상태다
+  - [x] 2.7 Speech_Service 및 Voice_Service 구현 (대사 생성, 음성 복제)
+    - Transcription_Adapter(설계 §13): Whisper 계열 서버 응답(초 단위 세그먼트) → 밀리초 정수 행, 힌트 언어는 신뢰도 없이 반환, 엔진 실패는 예외가 아니라 실패 결과로 반환(Req 27.16)
     - TTS_Adapter: 2개+ 엔진 연동, 언어 코드 검증
     - 스크립트 분할(800자 기본, 행/문장 종결 위치), 50ms 교차 페이드 접합
     - 행 단위 타이밍 저장, 개별 행 재합성 (타이밍 재정렬)
@@ -268,8 +268,8 @@
 
 ## Phase 5: Library, Playback, Sharing (라이브러리, 재생, 공유)
 
-- [ ] 5. 라이브러리·재생·공유 구현
-  - [ ] 5.1 Library_Service 구현 (조회, 검색, 다운로드)
+- [x] 5. 라이브러리·재생·공유 구현
+  - [x] 5.1 Library_Service 구현 (조회, 검색, 다운로드)
     - 페이지네이션(50건), 정렬(생성시각/제목/재생횟수), Asset_Kind 필터
     - 검색 (제목, 캡션, 가사, 태그 포함), 태그 관리(≤20개, ≤30자)
     - 소프트 삭제(30일 후 영구 삭제), 플레이리스트 순서 보존
@@ -280,7 +280,7 @@
     - **수용 기준**: 소유자 외 접근 403, 삭제→복원→영구삭제 흐름 확인, 다운로드 포맷 일치
 
 
-  - [ ] 5.2 Playback_Service 구현 (스트리밍, 파형, 루프)
+  - [x] 5.2 Playback_Service 구현 (스트리밍, 파형, 루프)
     - HTTP Range 요청 지원, S3+CDN 연동
     - 구간 이동 1초 이내 전송 시작
     - 재생 횟수 증가, Timed_Lyrics 싱크 표시
@@ -290,7 +290,7 @@
     - _설계: §2.3_
     - **수용 기준**: Range 요청 임의 위치 재생 확인, 비소유자 접근 거부, 루프 이음 연속 재생
 
-  - [ ] 5.3 Sharing_Service 구현 (공개, 탐색 피드, 좋아요)
+  - [x] 5.3 Sharing_Service 구현 (공개, 탐색 피드, 좋아요)
     - 기본 비공개, 공개 링크 발급 (추측 어려운 URL)
     - 공개 페이지: 제목, 캡션, 재생, AI 생성 표기
     - 공개 철회 → 404, 탐색 피드(공개+미삭제만)
@@ -305,7 +305,7 @@
 
 ## Phase 6: Safety, Consent, Licensing (안전, 동의, 라이선스)
 
-- [ ] 6. 안전·동의·라이선스 구현
+- [x] 6. 안전·동의·라이선스 구현
   - [x] 6.1 Moderation_Service 구현 (콘텐츠 정책 검사)
     - 캡션·가사·스크립트 정책 검사 파이프라인
     - 실존 아티스트명 → 스타일 서술 대체 + 알림
@@ -332,7 +332,7 @@
     - _설계: §9.2–§9.3_
     - **수용 기준**: 동의 철회 접수→잠정→사용 중지→삭제 흐름 E2E, 14일 미제출 시 복귀 확인
 
-  - [ ] 6.3 License_Descriptor 및 상업적 사용 전파 구현
+  - [x] 6.3 License_Descriptor 및 상업적 사용 전파 구현
     - License_Descriptor 5항목 필수 등록 (코드/가중치 라이선스, 상업 허용, 저작자표시, 원문링크)
     - 비상업 라이선스 식별자 목록 관리 (버전 식별자 증가)
     - 상업적 사용 전파: 계보 DAG 전체 (깊이 ≤32) + 사용 엔진 모두 참 → 참
@@ -347,8 +347,8 @@
 
 ## Phase 7: Frontend & Design System (프런트엔드, 디자인 시스템)
 
-- [ ] 7. 프런트엔드 및 디자인 시스템 구현
-  - [ ] 7.1 React SPA 보일러플레이트 및 Amicro 모션 시스템 셋업
+- [x] 7. 프런트엔드 및 디자인 시스템 구현
+  - [x] 7.1 React SPA 보일러플레이트 및 Amicro 모션 시스템 셋업
     - Vite 6 + React 19 + Tailwind CSS 4 + Motion 12 프로젝트 구성 (`musicstudio/web/`)
     - Amicro 레지스트리 버전 태그 고정 설치
     - Amicro_Motion_Preset 5종(`snappy`/`bouncy`/`smooth`/`gentle`/`stiff`) 참조 강제
@@ -361,7 +361,7 @@
     - **수용 기준**: 수치 리터럴 모션 값 빌드 실패, reduced-motion 시 장식 애니메이션 0프레임 확인
 
 
-  - [ ] 7.2 UI_Sound_Layer 구현 (78개 Semantic_Cue 재생)
+  - [x] 7.2 UI_Sound_Layer 구현 (78개 Semantic_Cue 재생)
     - AudioContext 최초 재생 시 생성, 신뢰된 조작으로 잠금 해제
     - 동시 재생 음성 ≤8, 초과 시 가장 오래된 원샷 회수 (루프 제외)
     - 루프 재요청 멱등 (기존 핸들 반환)
@@ -374,7 +374,7 @@
     - _설계: §8.3_
     - **수용 기준**: 루프 멱등 PBT, 동시 8개 초과 시 원샷 회수, 팩 전환 500ms 이내 확인
 
-  - [ ] 7.3 생성·편집 UI 페이지 구현
+  - [x] 7.3 생성·편집 UI 페이지 구현
     - Simple/Custom 모드 생성 폼 + 실시간 진행 표시 (로딩 구성요소, 진행률/순번)
     - 라이브러리 목록/검색/필터, 에셋 상세, 재생 플레이어
     - 타임라인 에디터: 클립 배치, 트림, 분할, 게인/페이드, 되돌리기
@@ -384,7 +384,7 @@
     - _설계: §8_
     - **수용 기준**: 각 주요 흐름(생성→결과 확인→다운로드) UI 렌더링 확인
 
-  - [ ] 7.4 접근성 및 키보드 네비게이션 구현
+  - [x] 7.4 접근성 및 키보드 네비게이션 구현
     - 애니메이션 중 대화형 구성요소 입력 수신 유지 (차단 0ms)
     - 포커스 이동 후 100ms 이내 표시, 경계 차이 ≤2px
     - 탭 순서 = 시각적 배치 순서
@@ -398,7 +398,7 @@
 ## Phase 8: Observability & Operations (관측성, 운영)
 
 - [ ] 8. 관측성 및 운영 도구 구현
-  - [ ] 8.1 구조화 로그 및 경보 시스템 구현
+  - [x] 8.1 구조화 로그 및 경보 시스템 구현
     - 모든 Generation_Job 구조화 로그: request_id, user_id, engine_id, model_name, duration_ms 등
     - 경보 조건 구현:
       - ACE_Engine 큐 사용률 ≥80%
@@ -412,7 +412,7 @@
     - **수용 기준**: 큐 80% 초과 시 경보 발송, 로그에 PII 미노출 확인
 
 
-  - [ ] 8.2 Admin_Console 및 Quality_Threshold_Set 구현
+  - [x] 8.2 Admin_Console 및 Quality_Threshold_Set 구현
     - 운영 현황 대시보드: 대기/진행/성공/실패 작업 수, 평균 소요시간
     - 엔진별 현황: 대기 작업, 15분 실패율, 일일 쿼터 잔량, 상태 점검 이력
     - Asset_Kind별 24시간 생성 개수/평균 소요시간

@@ -95,6 +95,22 @@ export interface MixdownAudioLocator {
 }
 
 /**
+ * Requirement 33.12: each participating asset's **stored** commercial-use flag.
+ *
+ * Stored rather than recomputed, because that flag has already folded in the asset's own
+ * lineage (`domain/commercial-use.ts`, Requirement 33.21). Walking each participant's ancestors
+ * again here would be a second implementation of the fold — and the two would disagree on the
+ * day someone changed one.
+ *
+ * A participant the port cannot answer for is treated as **not permitted** by the renderer: an
+ * unknown provenance can never widen permission, which is the same rule
+ * `propagateCommercialUse` applies to an asset missing from its input map.
+ */
+export interface MixdownCommercialUsePort {
+  commercialUseAllowedFor(assetIds: readonly string[]): Promise<ReadonlyMap<string, boolean>>;
+}
+
+/**
  * Requirement 28.24's `mix` Audio_Asset, plus 28.28's attenuation.
  *
  * `attenuationDb` is a field of its own rather than a key inside `provenance`, because

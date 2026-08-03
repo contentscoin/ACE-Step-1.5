@@ -100,6 +100,14 @@ export interface SubmitJobInput {
    */
   readonly speech?: SpeechParameters;
   /**
+   * Requirement 15.5's persona adapter, resolved by the gateway.
+   *
+   * Stored with the rest of the input, so a Requirement 6.4 retry re-applies the same
+   * adapter rather than falling back to the base model — a retry that quietly dropped the
+   * persona would produce a result in the wrong voice and look like a bad generation.
+   */
+  readonly personaAdapterRef?: string;
+  /**
    * Content policy verdict, evaluated lazily.
    *
    * A thunk rather than a value so it cannot be computed after the expensive work
@@ -362,5 +370,8 @@ function normaliseInput(input: SubmitJobInput): GenerationJobRecord['input'] {
     ...(input.edit === undefined ? {} : { edit: input.edit }),
     ...(input.sfx === undefined ? {} : { sfx: input.sfx }),
     ...(input.speech === undefined ? {} : { speech: input.speech }),
+    ...(input.personaAdapterRef === undefined
+      ? {}
+      : { personaAdapterRef: input.personaAdapterRef }),
   };
 }

@@ -1,0 +1,21 @@
+{
+  "$comment": "See README.md in this directory. This is the pinned Amicro registry listing, transcribed; the components beside it are vendored so a build reaches no network (Requirement 31.15).",
+  "registry": "@amicro",
+  "version": "v1.0.1",
+  "categories": {
+    "entry": ["fade-slide-enter", "scale-enter", "blur-enter"],
+    "hover": ["hover-lift", "hover-glow", "magnetic-hover"],
+    "text": ["text-reveal", "typewriter", "word-stagger"],
+    "loading": [
+      "waveform-loader",
+      "apple-equalizer",
+      "apple-sound-wave",
+      "siri-wave",
+      "wave-physics-loader",
+      "symmetric-wave",
+      "fluid-bars",
+      "spring-bars"
+    ]
+  },
+  "installed": ["fade-slide-enter", "hover-lift", "text-reveal", "waveform-loader"]
+}

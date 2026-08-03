@@ -30,6 +30,10 @@ eggs/
 .eggs/
 lib/
 lib64/
+# `lib/` above is Python packaging output and matches any directory of that name at any depth,
+# which swallows the web app's own source directory. Re-included by exact path so the Python rule
+# keeps its reach everywhere else.
+!musicstudio/web/src/lib/
 parts/
 sdist/
 var/

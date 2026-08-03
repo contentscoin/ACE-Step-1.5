@@ -37,6 +37,7 @@ from musicstudio_dsp.worker import (
     normalise_for_storage_task,
     normalise_loudness_task,
     render_mixdown_task,
+    waveform_task,
 )
 
 TASK_NAMES = (
@@ -53,6 +54,8 @@ TASK_NAMES = (
     "musicstudio_dsp.export_sound_pack",
     # Task 4.2's mixdown shell (Requirements 28.24-28.29).
     "musicstudio_dsp.render_mixdown",
+    # Task 5.2's waveform shell (Requirement 12.7).
+    "musicstudio_dsp.waveform",
 )
 
 
@@ -79,6 +82,7 @@ class TestApplication:
         assert cue_pack_similarity_task.name == TASK_NAMES[7]
         assert export_sound_pack_task.name == TASK_NAMES[8]
         assert render_mixdown_task.name == TASK_NAMES[9]
+        assert waveform_task.name == TASK_NAMES[10]
 
     def test_registers_no_task_this_tuple_does_not_name(self) -> None:
         # The tuple is exhaustive on purpose: a task added without extending it would be a
@@ -506,3 +510,49 @@ class TestRenderMixdownTask:
         with pytest.raises(MixdownError) as caught:
             render_mixdown_task([])
         assert caught.value.reason == "no_render_target"
+
+
+class TestWaveformTask:
+    """Task 5.2's shell — Requirement 12.7. The reduction is ``test_waveform.py``'s.
+
+    What is checked here is the crossing: that the audio arrives base64-encoded and the
+    drawing leaves as two parallel arrays of plain floats, which is the shape the product
+    layer's `WaveformPort` caches and a client draws from.
+    """
+
+    def test_returns_parallel_min_and_max_arrays(self) -> None:
+        payload = base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 48_000)).decode("ascii")
+
+        result = waveform_task.run(payload, 256)
+
+        assert result["buckets"] == 256
+        assert len(result["min"]) == len(result["max"]) == 256
+        assert all(low <= high for low, high in zip(result["min"], result["max"]))
+
+    def test_reports_what_a_client_needs_to_map_a_bucket_to_a_time(self) -> None:
+        payload = base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 48_000)).decode("ascii")
+
+        result = waveform_task.run(payload, 64)
+
+        assert abs(result["duration_ms"] - 1_000.0) <= 10.0
+        assert result["sample_rate"] == INTERNAL_SAMPLE_RATE
+        assert result["channels"] == 2
+
+    def test_result_is_json_serialisable(self) -> None:
+        # A numpy float leaking into the payload would fail at dispatch rather than here;
+        # `reduce_to_waveform` returns plain floats and this pins that it stays that way.
+        import json
+
+        payload = base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 4_800)).decode("ascii")
+
+        json.dumps(waveform_task.run(payload, 32))
+
+    def test_reports_the_bucket_count_it_actually_produced(self) -> None:
+        # Clamped to the frame count by the reduction: a caller that asked for more buckets
+        # than there are frames learns what it got rather than assuming what it asked for.
+        payload = base64.b64encode(wav_bytes(INTERNAL_SAMPLE_RATE, 48)).decode("ascii")
+
+        result = waveform_task.run(payload, 4_000)
+
+        assert result["buckets"] == 48
+        assert len(result["min"]) == 48
