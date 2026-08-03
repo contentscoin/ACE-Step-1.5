@@ -106,7 +106,7 @@
 
 ## Phase 2: Core Generation (곡, BGM, SFX, 대사, V2A)
 
-- [ ] 2. 생성 서비스 구현
+- [x] 2. 생성 서비스 구현
   - [x] 2.1 ACE_Engine_Adapter 및 Simple/Custom 모드 곡 생성
     - ACE_Engine HTTP API 연동 어댑터 (submit, poll, fetchResult)
     - Simple_Mode: `sample_mode=true`, `thinking=true`, 설명 1–2000자 검증
@@ -166,8 +166,8 @@
     - _설계: §5.4_
     - **수용 기준**: 온셋 정렬률 90% 이상 달성, 산출 오디오 길이 ±40ms 이내
 
-  - [ ] 2.7 Speech_Service 및 Voice_Service 구현 (대사 생성, 음성 복제)
-    - **잔여**: Requirement 27의 전사 엔진 어댑터(설계 §13의 Transcription_Adapter)가 미구현이다. `Transcription_Service`와 `TranscriptionEnginePort`는 존재하나 포트를 구현하는 프로덕션 어댑터가 없어 `adapters/transcription/`이 비어 있고, Req 27.1의 전사 반환이 실제로 동작하지 않는다. Req 25·26 범위(대사 생성, Voice_Profile, 음성 변환)는 완료 상태다
+  - [x] 2.7 Speech_Service 및 Voice_Service 구현 (대사 생성, 음성 복제)
+    - Transcription_Adapter(설계 §13): Whisper 계열 서버 응답(초 단위 세그먼트) → 밀리초 정수 행, 힌트 언어는 신뢰도 없이 반환, 엔진 실패는 예외가 아니라 실패 결과로 반환(Req 27.16)
     - TTS_Adapter: 2개+ 엔진 연동, 언어 코드 검증
     - 스크립트 분할(800자 기본, 행/문장 종결 위치), 50ms 교차 페이드 접합
     - 행 단위 타이밍 저장, 개별 행 재합성 (타이밍 재정렬)
@@ -268,7 +268,7 @@
 
 ## Phase 5: Library, Playback, Sharing (라이브러리, 재생, 공유)
 
-- [ ] 5. 라이브러리·재생·공유 구현
+- [x] 5. 라이브러리·재생·공유 구현
   - [x] 5.1 Library_Service 구현 (조회, 검색, 다운로드)
     - 페이지네이션(50건), 정렬(생성시각/제목/재생횟수), Asset_Kind 필터
     - 검색 (제목, 캡션, 가사, 태그 포함), 태그 관리(≤20개, ≤30자)
