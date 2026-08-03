@@ -25,12 +25,13 @@ import { EnterTransition } from '../components/amicro/EnterTransition';
 import { HoverLift } from '../components/amicro/HoverLift';
 import { TextReveal } from '../components/amicro/TextReveal';
 import { Player } from '../components/playback/Player';
+import { StatusMessage } from '../components/StatusMessage';
 import { useStudioApi } from '../lib/api/context';
 import { useSound } from '../sound/context';
 import type { DownloadOutcome, ShareState } from '../lib/api/port';
 import type { StudioAsset } from '../lib/api/types';
 import { navigate } from '../app/router';
-import { button, chip, column, input, label, meta, panel, refusal, row } from '../styles/ui';
+import { button, chip, column, input, label, meta, panel, row } from '../styles/ui';
 
 /**
  * Keyed by `DownloadRefusalCode` rather than by `string`, so a code with no Korean here is a type
@@ -169,7 +170,7 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
           )}
 
           {download !== null && !download.ruling.allowed && (
-            <div style={{ ...refusal, marginTop: 12 }} role="alert">
+            <StatusMessage kind="error" style={{ marginTop: 12 }}>
               <div>
                 {download.ruling.refusal === undefined
                   ? '다운로드가 거부되었습니다.'
@@ -182,7 +183,7 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
               {download.ruling.offeredFormats !== undefined && (
                 <div>제공 형식: {download.ruling.offeredFormats.join(', ')}</div>
               )}
-            </div>
+            </StatusMessage>
           )}
         </div>
 

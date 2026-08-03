@@ -14,7 +14,8 @@ import { SEMANTIC_CUE_NAMES } from '../../sound/cues';
 import { useSound } from '../../sound/context';
 import { SOUND_PACKS, SOUND_PACK_IDS, type SoundPackId } from '../../sound/packs';
 import { VOLUME_MAX, VOLUME_MIN, type SoundSettings } from '../../sound/settings';
-import { button, chip, label, meta, panel, refusal, row, tabular } from '../../styles/ui';
+import { StatusMessage } from '../StatusMessage';
+import { button, chip, label, meta, panel, row, tabular } from '../../styles/ui';
 
 export function SoundSettingsPanel(): ReactNode {
   const sound = useSound();
@@ -91,9 +92,9 @@ export function SoundSettingsPanel(): ReactNode {
       </div>
 
       {error !== null && (
-        <div style={{ ...refusal, marginTop: 12 }} role="alert">
+        <StatusMessage kind="error" style={{ marginTop: 12 }}>
           {error}
-        </div>
+        </StatusMessage>
       )}
 
       {/* Requirement 32.20: the interface-sound licence, on the open-source notice screen. */}

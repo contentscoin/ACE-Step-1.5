@@ -41,9 +41,10 @@ import {
 } from '@domain/timeline/project';
 
 import { EnterTransition } from '../components/amicro/EnterTransition';
+import { StatusMessage } from '../components/StatusMessage';
 import { useStudioApi } from '../lib/api/context';
 import { useSound } from '../sound/context';
-import { button, chip, column, label, meta, panel, primaryButton, refusal, row, tabular } from '../styles/ui';
+import { button, chip, column, label, meta, panel, primaryButton, row, tabular } from '../styles/ui';
 
 /** Pixels per second of timeline. Fixed rather than fitted, so a clip's width means a duration. */
 const PX_PER_SECOND = 22;
@@ -184,6 +185,12 @@ export function TimelinePage(): ReactNode {
               >
                 {project.clips
                   .filter((clip) => clip.track === track)
+                  // Requirement 31.13: these buttons are absolutely positioned, so DOM order is
+                  // the only thing keeping tab order equal to visual order — and `project.clips`
+                  // is in edit order, not left-to-right. A split inserts its halves wherever the
+                  // command put them, and without this sort the tab order silently stops matching
+                  // the lane the user is looking at.
+                  .sort((left, right) => left.startTimeMs - right.startTimeMs)
                   .map((clip) => (
                     <button
                       key={clip.id}
@@ -346,14 +353,14 @@ export function TimelinePage(): ReactNode {
         )}
 
         {rejection.length > 0 && (
-          <div style={refusal} role="alert">
+          <StatusMessage kind="error">
             <strong>편집이 거부되었습니다</strong>
             <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
               {rejection.map((entry) => (
                 <li key={entry}>{entry}</li>
               ))}
             </ul>
-          </div>
+          </StatusMessage>
         )}
       </div>
     </EnterTransition>

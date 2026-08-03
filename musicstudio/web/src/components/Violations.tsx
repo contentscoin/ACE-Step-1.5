@@ -13,7 +13,7 @@
 import type { ReactNode } from 'react';
 
 import type { SongFieldAllowance, SongFieldViolation } from '@domain/song/violation';
-import { refusal } from '../styles/ui';
+import { StatusMessage } from './StatusMessage';
 
 export function describeAllowance(allowed: SongFieldAllowance): string {
   switch (allowed.kind) {
@@ -36,7 +36,7 @@ export function Violations({ violations }: ViolationsProps): ReactNode {
   if (violations.length === 0) return null;
 
   return (
-    <div style={refusal} role="alert">
+    <StatusMessage kind="error">
       <strong>요청이 거부되었습니다 — {violations.length}건</strong>
       <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
         {violations.map((violation) => (
@@ -45,6 +45,6 @@ export function Violations({ violations }: ViolationsProps): ReactNode {
           </li>
         ))}
       </ul>
-    </div>
+    </StatusMessage>
   );
 }

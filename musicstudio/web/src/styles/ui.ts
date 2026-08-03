@@ -95,20 +95,10 @@ export const chip: CSSProperties = {
   opacity: 0.85,
 };
 
-/**
- * The refusal box.
- *
- * Requirements 3.5, 4.6, 13.4, 29.9 all specify that a refusal *carries* something — the field,
- * the allowance, the required plan, the permitted range — so refusals get a shape of their own
- * rather than a red border on the input. A message with nowhere to put the allowance ends up
- * dropping it.
- */
-export const refusal: CSSProperties = {
-  ...panel,
-  borderColor: 'var(--danger)',
-  background: 'var(--danger-surface)',
-  fontSize: 13,
-};
+// The refusal box used to live here as a style object. It is now `components/StatusMessage.tsx`,
+// because Requirements 31.16 and 32.16 need a refusal to carry a *shape* and a *word* as well as a
+// colour, and a `CSSProperties` value cannot render either. Every former user of it now renders
+// `<StatusMessage kind="error">`.
 
 export const meta: CSSProperties = {
   fontSize: 12,

@@ -46,10 +46,11 @@ import { reportMeasurement } from '@domain/mastering/measurement';
 import { LOUDNESS_TARGET_DEFAULT_LUFS, TRUE_PEAK_CEILING_DBTP } from '@domain/mastering/bounds';
 
 import { EnterTransition } from '../components/amicro/EnterTransition';
+import { StatusMessage } from '../components/StatusMessage';
 import { useStudioApi } from '../lib/api/context';
 import { useSound } from '../sound/context';
 import type { PreviewStream, StudioVersion } from '../lib/api/port';
-import { button, chip, column, input, label, meta, panel, primaryButton, refusal, row, tabular } from '../styles/ui';
+import { button, chip, column, input, label, meta, panel, primaryButton, row, tabular } from '../styles/ui';
 
 const VIOLATION_LABELS: Readonly<Record<ChainViolation['violation'], string>> = {
   chain_not_array: '체인은 배열이어야 합니다.',
@@ -419,7 +420,7 @@ export function MasteringPage({ assetId }: MasteringPageProps): ReactNode {
         </div>
 
         {violations.length > 0 && (
-          <div style={refusal} role="alert">
+          <StatusMessage kind="error">
             <strong>체인을 적용할 수 없습니다</strong>
             <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
               {violations.map((entry, index) => (
@@ -432,7 +433,7 @@ export function MasteringPage({ assetId }: MasteringPageProps): ReactNode {
                 </li>
               ))}
             </ul>
-          </div>
+          </StatusMessage>
         )}
       </div>
     </EnterTransition>

@@ -29,6 +29,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
+import { STATUS_PRESENTATION, type StatusKind } from '../../a11y/status';
 import { cueDefinition, type CueSeverity, type SemanticCue } from '../../sound/cues';
 import { useSound } from '../../sound/context';
 import { chip, meta, panel, row } from '../../styles/ui';
@@ -37,19 +38,21 @@ import { chip, meta, panel, row } from '../../styles/ui';
 export const CUE_ANNOUNCE_MIN_MS = 3_000;
 
 /**
- * Requirement 32.16's two non-colour channels. Shape and label, one row per state.
+ * Requirement 32.16's channels come from `a11y/status.ts`, not from a table here.
  *
- * `neutral` is present because the table has four severities, but the clause names three — the
- * three are what the test checks for pairwise distinctness.
+ * A cue's severity and a refusal's kind are the same four states, and the clause is about the
+ * product's states rather than the sound layer's. Re-exported so existing importers keep working
+ * — the type alias is what makes `CueSeverity` and `StatusKind` provably the same union.
  */
-export const SEVERITY_PRESENTATION: Readonly<
-  Record<CueSeverity, { readonly shape: string; readonly label: string; readonly colour: string }>
-> = {
-  neutral: { shape: '·', label: '알림', colour: 'var(--line)' },
-  success: { shape: '▲', label: '성공', colour: 'var(--accent)' },
-  warning: { shape: '■', label: '경고', colour: 'var(--danger)' },
-  error: { shape: '●', label: '오류', colour: 'var(--danger)' },
+const _severityIsStatusKind: Record<CueSeverity, StatusKind> = {
+  neutral: 'neutral',
+  success: 'success',
+  warning: 'warning',
+  error: 'error',
 };
+void _severityIsStatusKind;
+
+export const SEVERITY_PRESENTATION = STATUS_PRESENTATION;
 
 interface Announcement {
   readonly cue: SemanticCue;
@@ -106,7 +109,7 @@ export function CueAnnouncer(): ReactNode {
         bottom: 16,
         maxWidth: 380,
         zIndex: 50,
-        borderColor: presentation.colour,
+        borderColor: presentation.tone,
       }}
     >
       <span aria-hidden="true" style={{ fontSize: 18 }}>

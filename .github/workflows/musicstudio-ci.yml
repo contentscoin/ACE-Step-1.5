@@ -128,7 +128,7 @@ jobs:
   # so the offline half is a property of the build *script* (nothing fetches) rather
   # than of the runner; `web/src/components/amicro/README.md` records why.
   web:
-    name: Web (motion + sound checks + tests + build)
+    name: Web (static checks + tests + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -150,6 +150,9 @@ jobs:
 
       - name: Sound runtime size check (Requirement 32.17)
         run: npm run check:sound
+
+      - name: Accessibility static check (Requirements 31.11, 31.13, 31.14)
+        run: npm run check:a11y
 
       - name: Test (vitest)
         run: npm test

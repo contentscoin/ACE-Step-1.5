@@ -10,6 +10,12 @@
  *
  * `:focus-visible`, not `:focus`, so a pointer click does not leave a ring on a surface the user
  * is already looking at — which is what makes a keyboard user's ring meaningful.
+ *
+ * The offset is `--focus-ring-offset` rather than a literal, because it **is** the boundary
+ * difference Requirement 31.14 bounds at 2 px: an outline paints on the element's own border box,
+ * so the offset is the whole of the gap, in every frame, however the element is animating.
+ * `src/a11y/focus.ts` holds the same number and `test/a11y/focus.test.ts` asserts the two agree —
+ * raising this for looks without noticing is precisely how the criterion goes quietly false.
  */
 /**
  * The palette `src/styles/ui.ts` spends.
@@ -34,13 +40,17 @@
   --danger: light-dark(#c0392b, #f08a80);
   --danger-surface: light-dark(#fdf2f0, #2a1a18);
 
+  /* Requirement 31.14. Mirrored by FOCUS_RING_OFFSET_PX / FOCUS_RING_WIDTH_PX in a11y/focus.ts. */
+  --focus-ring-offset: 2px;
+  --focus-ring-width: 2px;
+
   background: light-dark(#fbfbfd, #0d0f13);
   color: var(--ink);
 }
 
 *:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid currentColor;
+  outline-offset: var(--focus-ring-offset);
 }
 
 /**

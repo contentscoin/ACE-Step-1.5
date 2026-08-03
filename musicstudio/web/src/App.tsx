@@ -18,6 +18,7 @@
 
 import type { ReactNode } from 'react';
 
+import { MainRegion, SkipLink } from './a11y/SkipLink';
 import { hrefFor, useRoute } from './app/router';
 import { EnterTransition } from './components/amicro/EnterTransition';
 import { HoverLift } from './components/amicro/HoverLift';
@@ -123,6 +124,8 @@ export function App(): ReactNode {
     <StudioApiProvider>
       <SoundProvider>
         <main style={{ maxWidth: 980, margin: '0 auto', padding: 24, lineHeight: 1.6 }}>
+          {/* First in the DOM, so it is the first Tab stop — see `a11y/SkipLink.tsx`. */}
+          <SkipLink />
           <header style={{ marginBottom: 20 }}>
             <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>
               <TextReveal text="MusicStudio" />
@@ -161,10 +164,14 @@ export function App(): ReactNode {
             </nav>
           </header>
 
-          {/* Keyed by route so a screen remounts — and reloads — when the parameter changes. */}
-          <div key={`${route.name}/${route.parameter ?? ''}`}>
-            {screenFor(route.name, route.parameter)}
-          </div>
+          {/* Keyed by route so a screen remounts — and reloads — when the parameter changes.
+              `MainRegion` moves focus here on every change, so a keyboard user lands on the new
+              screen rather than in the nav they just left. */}
+          <MainRegion routeKey={`${route.name}/${route.parameter ?? ''}`}>
+            <div key={`${route.name}/${route.parameter ?? ''}`}>
+              {screenFor(route.name, route.parameter)}
+            </div>
+          </MainRegion>
           {/* Requirement 32.15: every played cue's sentence, within the same task it fired in. */}
           <CueAnnouncer />
         </main>
