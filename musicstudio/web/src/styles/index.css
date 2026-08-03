@@ -11,8 +11,31 @@
  * `:focus-visible`, not `:focus`, so a pointer click does not leave a ring on a surface the user
  * is already looking at — which is what makes a keyboard user's ring meaningful.
  */
+/**
+ * The palette `src/styles/ui.ts` spends.
+ *
+ * Custom properties rather than two sets of style objects, because the light and dark schemes then
+ * differ in one place instead of at every `background:` in the app — and because a component that
+ * writes `var(--surface)` cannot be the thing that gets one of the two schemes wrong.
+ *
+ * `light-dark()` rather than a `prefers-color-scheme` block: the pairs stay written together, so a
+ * colour added to one scheme cannot be forgotten in the other. It is Baseline-available and the
+ * `color-scheme` declaration below is what activates it.
+ */
 :root {
   color-scheme: light dark;
+
+  --ink: light-dark(#16181d, #e9ecf1);
+  --surface: light-dark(#ffffff, #14161b);
+  --field: light-dark(#f4f5f8, #1c1f26);
+  --line: light-dark(#d9dce3, #2f343e);
+  --accent: light-dark(#3b5bdb, #7c93f5);
+  --accent-ink: light-dark(#ffffff, #0d1017);
+  --danger: light-dark(#c0392b, #f08a80);
+  --danger-surface: light-dark(#fdf2f0, #2a1a18);
+
+  background: light-dark(#fbfbfd, #0d0f13);
+  color: var(--ink);
 }
 
 *:focus-visible {

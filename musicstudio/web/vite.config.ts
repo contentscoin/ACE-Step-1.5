@@ -17,12 +17,22 @@
  * run after the output directory had already been written for a watch build.
  */
 
+import { fileURLToPath } from 'node:url';
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      // The UI applies the *same* rule functions the services do — see `src/lib/api/README.md`.
+      // A screen that re-derived "which assets are in this listing" or "which byte window is this"
+      // would be a second answer to a question the domain already answers.
+      '@domain': fileURLToPath(new URL('../domain', import.meta.url)),
+    },
+  },
   build: {
     // A named directory rather than the default, because `eslint.config.mjs` and the repository's
     // ignore rules already name `web/dist`.
