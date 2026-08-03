@@ -100,6 +100,18 @@ export interface NormalizedGenerationRequest {
    * `speech.seed` records only what the caller named.
    */
   readonly speech?: SpeechParameters;
+  /**
+   * Requirement 15.5 — the persona adapter to apply, already resolved.
+   *
+   * A **ref**, not a persona id: 15.6's ownership check has already happened by the time a
+   * request reaches this shape, and carrying the persona id this far would invite an
+   * adapter to re-resolve it against an account it cannot see. What crosses the boundary is
+   * the engine's own opaque handle for the trained weights, which is exactly what an engine
+   * adapter needs and nothing more.
+   *
+   * Absent for every request that names no persona, which is most of them.
+   */
+  readonly personaAdapterRef?: string;
 }
 
 export interface NormalizedGenerationResult {

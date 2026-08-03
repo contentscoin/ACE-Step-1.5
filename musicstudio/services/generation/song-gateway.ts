@@ -41,8 +41,25 @@ import { songRequestInvalid } from './song-errors';
  */
 export const UNSPECIFIED_LENGTH_RESERVATION_SECONDS = 240;
 
+/**
+ * Requirements 15.5, 15.6 — the persona surface, narrowed to one call.
+ *
+ * The gateway asks for an adapter and gets one or a rejection; it does not fetch a persona
+ * and read its fields. 15.6's ownership check and 15.5's readiness check are a single
+ * decision that `services/persona` owns, and a gateway re-deriving it from a record would
+ * be a second place for "may this account use this persona" to be answered — which is the
+ * kind of duplication that eventually answers differently.
+ *
+ * Structurally satisfied by `createPersonaService(...)`, without this module importing it.
+ */
+export interface PersonaAdapterResolver {
+  resolveAdapter(personaId: string, requesterId: string): Promise<string>;
+}
+
 export interface SongGatewayOptions {
   readonly orchestrator: JobOrchestrator;
+  /** Requirement 15.5. Omitted in compositions with no Persona_Service. */
+  readonly personas?: PersonaAdapterResolver;
   /** `song` for Requirements 3 and 4; task 2.4 reuses the gateway with `bgm`. */
   readonly assetKind?: AssetKind;
   readonly reservedLengthSeconds?: number;
@@ -63,16 +80,20 @@ export interface SongSubmissionInput {
   readonly engineId?: string;
   /** Content policy verdict, evaluated lazily by the orchestrator (design §9.1). */
   readonly moderate?: () => ModerationDecision;
+  /** Requirement 15.5: the persona to generate in. Refused by 15.6 if not the caller's. */
+  readonly personaId?: string;
 }
 
 export class SongGateway {
   private readonly orchestrator: JobOrchestrator;
+  private readonly personas: PersonaAdapterResolver | null;
   private readonly assetKind: AssetKind;
   private readonly reservedLengthSeconds: number;
   private readonly durationBounds: SongDurationBounds;
 
   constructor(options: SongGatewayOptions) {
     this.orchestrator = options.orchestrator;
+    this.personas = options.personas ?? null;
     this.assetKind = options.assetKind ?? 'song';
     this.reservedLengthSeconds =
       options.reservedLengthSeconds ?? UNSPECIFIED_LENGTH_RESERVATION_SECONDS;
@@ -90,7 +111,24 @@ export class SongGateway {
     if (validation.kind === 'invalid') {
       throw songRequestInvalid(validation.violations);
     }
-    return this.orchestrator.submit(this.submissionOf(input, validation.parameters));
+
+    // Requirements 15.5, 15.6 — resolved before the orchestrator, so a persona the caller
+    // does not own is refused before routing, moderation or the credit debit, exactly as a
+    // malformed request is. A 403 that arrived after a charge would need a refund path.
+    const personaAdapterRef = await this.resolvePersona(input);
+
+    return this.orchestrator.submit({
+      ...this.submissionOf(input, validation.parameters),
+      ...(personaAdapterRef === null ? {} : { personaAdapterRef }),
+    });
+  }
+
+  private async resolvePersona(input: SongSubmissionInput): Promise<string | null> {
+    if (input.personaId === undefined) return null;
+    if (this.personas === null) {
+      throw new Error('a personaId was submitted to a gateway composed without a Persona_Service');
+    }
+    return this.personas.resolveAdapter(input.personaId, input.accountId);
   }
 
   private submissionOf(input: SongSubmissionInput, song: SongParameters): SubmitJobInput {

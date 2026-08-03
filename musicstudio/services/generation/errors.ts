@@ -200,7 +200,36 @@ export type GenerationErrorCode =
   /** The asset exists but its audio does not, so there is nothing to stream. */
   | 'playback_audio_unavailable'
   /** Requirement 12.7 — a bucket count outside the permitted range. */
-  | 'playback_waveform_request_invalid';
+  | 'playback_waveform_request_invalid'
+  /**
+   * Requirement 14.4 — the share link names nothing published.
+   *
+   * The single answer for four different states: never published, revoked, soft-deleted, or
+   * withheld by review. 14.4 fixes 404 for the revoked case, and answering anything more
+   * specific for the others would tell a stranger holding a stale link which one it is.
+   */
+  | 'sharing_link_not_found'
+  /** Requirements 14.2, 14.4 — publishing or revoking someone else's asset. 403 per 11.9. */
+  | 'sharing_asset_forbidden'
+  | 'sharing_asset_not_found'
+  /** Requirement 14.7 — a like on an asset that is not public. */
+  | 'sharing_asset_not_public'
+  /** Requirement 14.9 — the owner did not permit remote remixing. */
+  | 'sharing_remix_not_permitted'
+  /** Requirements 14.5, 14.6 — a malformed feed query. */
+  | 'sharing_feed_query_invalid'
+  /** Requirement 14.11 — no such Sound_Pack, or it belongs to another account. */
+  | 'sharing_sound_pack_not_found'
+  | 'sharing_sound_pack_forbidden'
+  /** Requirements 15.2, 15.8 — the training request is refused; carries the minimum. */
+  | 'persona_request_invalid'
+  | 'persona_not_found'
+  /** Requirement 15.6 — a persona the requester does not own. 403, stated by the criterion. */
+  | 'persona_forbidden'
+  /** Requirement 15.5 — the persona exists but is not trained, so there is no adapter. */
+  | 'persona_not_ready'
+  /** Requirement 15.1 — a reference song that is missing or not the requester's. */
+  | 'persona_reference_invalid';
 
 export class GenerationError extends Error {
   readonly statusCode: number;
