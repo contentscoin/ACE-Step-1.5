@@ -20,11 +20,13 @@ import type { FeedPage } from '@domain/sharing/feed';
 import { EnterTransition } from '../components/amicro/EnterTransition';
 import { HoverLift } from '../components/amicro/HoverLift';
 import { useStudioApi } from '../lib/api/context';
+import { useSound } from '../sound/context';
 import { navigate } from '../app/router';
 import { button, chip, column, input, label, meta, panel, row, tabular } from '../styles/ui';
 
 export function ExplorePage(): ReactNode {
   const api = useStudioApi();
+  const sound = useSound();
 
   const [assetKind, setAssetKind] = useState('');
   const [genre, setGenre] = useState('');
@@ -108,6 +110,9 @@ export function ExplorePage(): ReactNode {
                     void api.like(asset.id).then((outcome) => {
                       // The count the service returned — see the header on why not a local ++.
                       setLikes((current) => ({ ...current, [asset.id]: outcome.likeCount }));
+                      // Requirement 14.8's "unchanged" has its own cue: a repeat that sounded
+                      // like a first like would tell the user something happened.
+                      sound.play(outcome.changed ? 'sharing.like.added' : 'sharing.like.repeat');
                     })
                   }
                 >

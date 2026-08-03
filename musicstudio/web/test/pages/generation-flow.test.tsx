@@ -22,6 +22,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ReactNode } from 'react';
 
 import { StudioApiProvider } from '../../src/lib/api/context';
+import { createUISoundLayer } from '../../src/sound/layer';
+import { SoundProvider } from '../../src/sound/context';
+import { createMemoryStore, createRecordingEngine } from '../support/recording-engine';
 import { createDemoApi } from '../../src/lib/api/demo-api';
 import type { StudioApi } from '../../src/lib/api/port';
 import { GeneratePage } from '../../src/pages/GeneratePage';
@@ -40,8 +43,21 @@ function movableClock(startMs = 1_700_000_000_000) {
   };
 }
 
+/**
+ * The screens fire sound cues, so they need a `SoundProvider` — and a recording engine rather than
+ * a real one, because there is no `AudioContext` here. The layer is otherwise the production one:
+ * a screen that played a cue with no table entry would still fail to typecheck.
+ */
 function mount(api: StudioApi, screenNode: ReactNode) {
-  return render(<StudioApiProvider api={api}>{screenNode}</StudioApiProvider>);
+  const sound = createUISoundLayer({
+    engine: createRecordingEngine(),
+    store: createMemoryStore(),
+  });
+  return render(
+    <StudioApiProvider api={api}>
+      <SoundProvider layer={sound}>{screenNode}</SoundProvider>
+    </StudioApiProvider>,
+  );
 }
 
 describe('생성 → 결과 확인 → 다운로드', () => {

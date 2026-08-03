@@ -47,6 +47,7 @@ import { LOUDNESS_TARGET_DEFAULT_LUFS, TRUE_PEAK_CEILING_DBTP } from '@domain/ma
 
 import { EnterTransition } from '../components/amicro/EnterTransition';
 import { useStudioApi } from '../lib/api/context';
+import { useSound } from '../sound/context';
 import type { PreviewStream, StudioVersion } from '../lib/api/port';
 import { button, chip, column, input, label, meta, panel, primaryButton, refusal, row, tabular } from '../styles/ui';
 
@@ -161,6 +162,7 @@ export interface MasteringPageProps {
 
 export function MasteringPage({ assetId }: MasteringPageProps): ReactNode {
   const api = useStudioApi();
+  const sound = useSound();
 
   const [suggestion, setSuggestion] = useState<MasteringSuggestion | null>(null);
   const [working, setWorking] = useState<EffectChain | null>(null);
@@ -309,6 +311,7 @@ export function MasteringPage({ assetId }: MasteringPageProps): ReactNode {
                     if (kind === ('' as EffectKind)) return;
                     setWorking({ items: [...working.items, defaultItem(kind)] });
                     setSaved(false);
+                    sound.play('effects.chain.itemAdded');
                   }}
                 >
                   <option value="">선택…</option>
@@ -339,7 +342,14 @@ export function MasteringPage({ assetId }: MasteringPageProps): ReactNode {
                 type="button"
                 style={button}
                 disabled={violations.length > 0}
-                onClick={() => void api.previewChain(assetId, working).then(setPreview)}
+                onClick={() =>
+                  void api.previewChain(assetId, working).then((stream) => {
+                    setPreview(stream);
+                    // A loop: the user is listening *inside* this state, and Requirement 32.7
+                    // stops it when they leave it.
+                    sound.play('effects.preview.started');
+                  })
+                }
               >
                 미리듣기 (저장 안 함)
               </button>
@@ -351,9 +361,13 @@ export function MasteringPage({ assetId }: MasteringPageProps): ReactNode {
                   void api.setEffectChain(assetId, working).then((stored) => {
                     setWorking(stored);
                     setSaved(true);
+                    sound.stopCue('effects.preview.started');
                     return api
                       .saveVersion(assetId, `마스터 ${String(versionList.length)}`, stored)
-                      .then(setVersionList);
+                      .then((next) => {
+                        setVersionList(next);
+                        sound.play('effects.version.saved');
+                      });
                   })
                 }
               >
@@ -389,7 +403,12 @@ export function MasteringPage({ assetId }: MasteringPageProps): ReactNode {
                     type="button"
                     style={button}
                     aria-label={`${version.name} 기본 버전으로 지정`}
-                    onClick={() => void api.setDefaultVersion(assetId, version.id).then(setVersionList)}
+                    onClick={() =>
+                      void api.setDefaultVersion(assetId, version.id).then((next) => {
+                        setVersionList(next);
+                        sound.play('effects.version.promoted');
+                      })
+                    }
                   >
                     기본으로
                   </button>

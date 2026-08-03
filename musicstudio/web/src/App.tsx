@@ -22,7 +22,10 @@ import { hrefFor, useRoute } from './app/router';
 import { EnterTransition } from './components/amicro/EnterTransition';
 import { HoverLift } from './components/amicro/HoverLift';
 import { TextReveal } from './components/amicro/TextReveal';
+import { CueAnnouncer } from './components/sound/CueAnnouncer';
+import { SoundSettingsPanel } from './components/sound/SoundSettingsPanel';
 import { StudioApiProvider } from './lib/api/context';
+import { SoundProvider } from './sound/context';
 import { MOTION_CLASSIFICATION_TABLE } from './motion/classification';
 import { useReducedMotion } from './motion/reduced-motion';
 import { OPEN_SOURCE_NOTICES } from './notices/open-source';
@@ -73,8 +76,10 @@ function SystemPage(): ReactNode {
           </ul>
         </div>
 
+        <SoundSettingsPanel />
+
         <div style={panel}>
-          <h2 style={{ marginTop: 0, fontSize: 18 }}>오픈소스 고지 (Req 31.17)</h2>
+          <h2 style={{ marginTop: 0, fontSize: 18 }}>오픈소스 고지 (Req 31.17, 32.20)</h2>
           <ul>
             {OPEN_SOURCE_NOTICES.map((notice) => (
               <li key={notice.name}>
@@ -116,50 +121,54 @@ export function App(): ReactNode {
 
   return (
     <StudioApiProvider>
-      <main style={{ maxWidth: 980, margin: '0 auto', padding: 24, lineHeight: 1.6 }}>
-        <header style={{ marginBottom: 20 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>
-            <TextReveal text="MusicStudio" />
-          </h1>
-          <p style={meta}>멀티모달 AI 오디오 스튜디오</p>
-          <nav style={{ ...row, flexWrap: 'wrap', marginTop: 12 }} aria-label="주요 화면">
-            {NAV.map((item) => {
-              const current =
-                item.name === route.name ||
-                // The asset detail screen is reached from the library and belongs to it.
-                (item.name === 'library' && route.name === 'asset');
-              return (
-                <HoverLift key={item.name}>
-                  <a
-                    href={
-                      item.name === 'mastering'
-                        ? hrefFor(item.name, DEFAULT_ASSET_ID)
-                        : hrefFor(item.name)
-                    }
-                    aria-current={current ? 'page' : undefined}
-                    style={{
-                      ...chip,
-                      textDecoration: 'none',
-                      color: 'inherit',
-                      padding: '6px 12px',
-                      fontSize: 14,
-                      opacity: current ? 1 : 0.7,
-                      borderColor: current ? 'var(--accent)' : 'var(--line)',
-                    }}
-                  >
-                    {item.title}
-                  </a>
-                </HoverLift>
-              );
-            })}
-          </nav>
-        </header>
+      <SoundProvider>
+        <main style={{ maxWidth: 980, margin: '0 auto', padding: 24, lineHeight: 1.6 }}>
+          <header style={{ marginBottom: 20 }}>
+            <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>
+              <TextReveal text="MusicStudio" />
+            </h1>
+            <p style={meta}>멀티모달 AI 오디오 스튜디오</p>
+            <nav style={{ ...row, flexWrap: 'wrap', marginTop: 12 }} aria-label="주요 화면">
+              {NAV.map((item) => {
+                const current =
+                  item.name === route.name ||
+                  // The asset detail screen is reached from the library and belongs to it.
+                  (item.name === 'library' && route.name === 'asset');
+                return (
+                  <HoverLift key={item.name}>
+                    <a
+                      href={
+                        item.name === 'mastering'
+                          ? hrefFor(item.name, DEFAULT_ASSET_ID)
+                          : hrefFor(item.name)
+                      }
+                      aria-current={current ? 'page' : undefined}
+                      style={{
+                        ...chip,
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        padding: '6px 12px',
+                        fontSize: 14,
+                        opacity: current ? 1 : 0.7,
+                        borderColor: current ? 'var(--accent)' : 'var(--line)',
+                      }}
+                    >
+                      {item.title}
+                    </a>
+                  </HoverLift>
+                );
+              })}
+            </nav>
+          </header>
 
-        {/* Keyed by route so a screen remounts — and reloads — when the parameter changes. */}
-        <div key={`${route.name}/${route.parameter ?? ''}`}>
-          {screenFor(route.name, route.parameter)}
-        </div>
-      </main>
+          {/* Keyed by route so a screen remounts — and reloads — when the parameter changes. */}
+          <div key={`${route.name}/${route.parameter ?? ''}`}>
+            {screenFor(route.name, route.parameter)}
+          </div>
+          {/* Requirement 32.15: every played cue's sentence, within the same task it fired in. */}
+          <CueAnnouncer />
+        </main>
+      </SoundProvider>
     </StudioApiProvider>
   );
 }

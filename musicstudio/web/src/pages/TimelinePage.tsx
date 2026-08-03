@@ -42,6 +42,7 @@ import {
 
 import { EnterTransition } from '../components/amicro/EnterTransition';
 import { useStudioApi } from '../lib/api/context';
+import { useSound } from '../sound/context';
 import { button, chip, column, label, meta, panel, primaryButton, refusal, row, tabular } from '../styles/ui';
 
 /** Pixels per second of timeline. Fixed rather than fitted, so a clip's width means a duration. */
@@ -79,6 +80,7 @@ function describeViolation(violation: TimelineViolation): string {
 
 export function TimelinePage(): ReactNode {
   const api = useStudioApi();
+  const sound = useSound();
 
   const [project, setProject] = useState<TimelineProject | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -108,6 +110,7 @@ export function TimelinePage(): ReactNode {
             `${overlap.clipId} 이(가) 트랙 ${String(overlap.track + 1)}의 ${overlap.otherClipId} 와(과) ${String(overlap.overlapMs)}ms 겹칩니다.`,
         ),
       ]);
+      sound.play('timeline.edit.refused');
       return;
     }
     setRejection([]);
@@ -142,6 +145,7 @@ export function TimelinePage(): ReactNode {
                 setProject(step.project);
                 setCanUndo(step.canUndo);
                 setCanRedo(step.canRedo);
+                sound.play('timeline.undo');
               })
             }
           >
@@ -156,6 +160,7 @@ export function TimelinePage(): ReactNode {
                 setProject(step.project);
                 setCanUndo(step.canUndo);
                 setCanRedo(step.canRedo);
+                sound.play('timeline.redo');
               })
             }
           >

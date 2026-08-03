@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "check:motion": "node scripts/check-motion-presets.mjs",
-    "build": "npm run check:motion && tsc --noEmit && vite build",
+    "check:sound": "node scripts/check-sound-size.mjs",
+    "build": "npm run check:motion && npm run check:sound && tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -25,6 +26,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "fast-check": "^4.9.0",
     "happy-dom": "^20.0.0",
     "tailwindcss": "^4.1.14",
     "typescript": "^5.9.3",

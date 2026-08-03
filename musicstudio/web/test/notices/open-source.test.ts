@@ -47,7 +47,13 @@ describe('Requirement 31.17 — the Amicro notice', () => {
     for (const notice of OPEN_SOURCE_NOTICES) {
       expect(notice.name.length).toBeGreaterThan(0);
       expect(notice.license.length).toBeGreaterThan(0);
-      expect(notice.url).toMatch(/^https:\/\//);
+      // A dependency links to its project; our own entries link to the source that produces
+      // them, because there is no upstream to link to. Both have to point somewhere.
+      if (notice.firstParty === true) {
+        expect(notice.url).toMatch(/^musicstudio\/.+\.[a-z]+$/);
+      } else {
+        expect(notice.url).toMatch(/^https:\/\//);
+      }
       expect(notice.copyright.length).toBeGreaterThan(0);
     }
   });

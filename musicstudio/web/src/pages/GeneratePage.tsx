@@ -43,6 +43,7 @@ import { WaveformLoader } from '../components/amicro/WaveformLoader';
 import { Violations } from '../components/Violations';
 import { progressLabel, PROGRESS_TEXT_REFRESH_MS } from '../components/generation/progress';
 import { useStudioApi } from '../lib/api/context';
+import { useSound } from '../sound/context';
 import type { StudioJob } from '../lib/api/types';
 import { navigate } from '../app/router';
 import { button, column, input, label, meta, panel, primaryButton, row, tabular } from '../styles/ui';
@@ -78,6 +79,7 @@ const KEY_SCALE_OPTIONS: readonly string[] = KEY_SCALE_NOTES.flatMap((note) =>
 
 export function GeneratePage(): ReactNode {
   const api = useStudioApi();
+  const sound = useSound();
 
   const [mode, setMode] = useState<Mode>('simple');
   const [description, setDescription] = useState('늦은 밤 도심을 달리는 로파이 트랙');
@@ -125,6 +127,7 @@ export function GeneratePage(): ReactNode {
     const outcome = await api.submitSong(buildRequest());
     setViolations(outcome.violations ?? []);
     setJob(outcome.job ?? null);
+    sound.play(outcome.kind === 'accepted' ? 'generation.submit.accepted' : 'generation.submit.rejected');
   }
 
   // Requirement 5.4: the status is polled while the job is live. The interval is the progress
@@ -143,6 +146,28 @@ export function GeneratePage(): ReactNode {
     };
   }, [api, job]);
 
+  // Requirements 32.7, 32.22: the waiting states are loops, and they stop the moment the state
+  // they represent ends. Driven off `job.state` rather than off the buttons, so a job that
+  // finishes while the user is elsewhere still silences its own loop.
+  useEffect(() => {
+    if (job === null) return;
+    if (job.state === 'queued') {
+      sound.stopCue('generation.running');
+      sound.play('generation.queued');
+      return;
+    }
+    if (job.state === 'running') {
+      sound.stopCue('generation.queued');
+      sound.play('generation.running');
+      return;
+    }
+    sound.stopCue('generation.queued');
+    sound.stopCue('generation.running');
+    if (job.state === 'succeeded') sound.play('generation.succeeded');
+    if (job.state === 'failed') sound.play('generation.failed');
+    if (job.state === 'cancelled') sound.play('generation.cancelled');
+  }, [sound, job]);
+
   const live = job !== null && (job.state === 'queued' || job.state === 'running');
   const produced = job?.state === 'succeeded' ? job.assetIds[0] : undefined;
 
@@ -156,6 +181,7 @@ export function GeneratePage(): ReactNode {
               type="button"
               onClick={() => {
                 setMode(candidate);
+                sound.play('generation.mode.switched');
               }}
               style={mode === candidate ? primaryButton : button}
               aria-pressed={mode === candidate}
@@ -371,6 +397,7 @@ export function GeneratePage(): ReactNode {
                   style={button}
                   onClick={() => void api.retryJob(job.jobId).then((outcome) => {
                     setJob(outcome.job ?? null);
+                    sound.play('generation.retry.started');
                   })}
                 >
                   재시도

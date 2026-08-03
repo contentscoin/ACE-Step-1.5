@@ -361,7 +361,7 @@
     - **수용 기준**: 수치 리터럴 모션 값 빌드 실패, reduced-motion 시 장식 애니메이션 0프레임 확인
 
 
-  - [ ] 7.2 UI_Sound_Layer 구현 (78개 Semantic_Cue 재생)
+  - [x] 7.2 UI_Sound_Layer 구현 (78개 Semantic_Cue 재생)
     - AudioContext 최초 재생 시 생성, 신뢰된 조작으로 잠금 해제
     - 동시 재생 음성 ≤8, 초과 시 가장 오래된 원샷 회수 (루프 제외)
     - 루프 재요청 멱등 (기존 핸들 반환)

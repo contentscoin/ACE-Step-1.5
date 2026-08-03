@@ -26,6 +26,7 @@ import { HoverLift } from '../components/amicro/HoverLift';
 import { TextReveal } from '../components/amicro/TextReveal';
 import { Player } from '../components/playback/Player';
 import { useStudioApi } from '../lib/api/context';
+import { useSound } from '../sound/context';
 import type { DownloadOutcome, ShareState } from '../lib/api/port';
 import type { StudioAsset } from '../lib/api/types';
 import { navigate } from '../app/router';
@@ -48,6 +49,7 @@ export interface AssetPageProps {
 
 export function AssetPage({ assetId }: AssetPageProps): ReactNode {
   const api = useStudioApi();
+  const sound = useSound();
 
   const [asset, setAsset] = useState<StudioAsset | null>(null);
   const [share, setShare] = useState<ShareState | null>(null);
@@ -117,7 +119,12 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
             <button
               type="button"
               style={button}
-              onClick={() => void api.renameAsset(asset.id, name).then(setAsset)}
+              onClick={() =>
+                void api.renameAsset(asset.id, name).then((next) => {
+                  setAsset(next);
+                  sound.play('library.asset.renamed');
+                })
+              }
             >
               저장
             </button>
@@ -135,7 +142,18 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
                   onClick={() =>
                     void api
                       .planDownload(asset.id, format, format === 'wav' || format === 'flac')
-                      .then(setDownload)
+                      .then((outcome) => {
+                        setDownload(outcome);
+                        // The cue names the *reason*, so the sound and the message on screen are
+                        // the same fact rather than a generic failure beep beside a specific one.
+                        sound.play(
+                          outcome.ruling.allowed
+                            ? 'download.prepared'
+                            : outcome.ruling.refusal === 'download_lossless_not_entitled'
+                              ? 'download.refused.plan'
+                              : 'download.refused.format',
+                        );
+                      })
                   }
                 >
                   {format.toUpperCase()}
@@ -177,7 +195,10 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
               onChange={(event) =>
                 void api
                   .setPublished(asset.id, event.target.checked, share?.remixAllowed ?? false)
-                  .then(setShare)
+                  .then((next) => {
+                    setShare(next);
+                    sound.play(next.published ? 'sharing.published' : 'sharing.revoked');
+                  })
               }
             />
             <span>공개</span>

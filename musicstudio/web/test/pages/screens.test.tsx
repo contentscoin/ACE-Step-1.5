@@ -17,6 +17,9 @@ import type { ReactNode } from 'react';
 import { CLIP_GAIN_DB_MAX } from '@domain/timeline/bounds';
 
 import { StudioApiProvider } from '../../src/lib/api/context';
+import { createUISoundLayer } from '../../src/sound/layer';
+import { SoundProvider } from '../../src/sound/context';
+import { createMemoryStore, createRecordingEngine } from '../support/recording-engine';
 import { createDemoApi } from '../../src/lib/api/demo-api';
 import type { StudioApi } from '../../src/lib/api/port';
 import { AssetPage } from '../../src/pages/AssetPage';
@@ -27,8 +30,21 @@ import { TimelinePage } from '../../src/pages/TimelinePage';
 
 afterEach(cleanup);
 
+/**
+ * The screens fire sound cues, so they need a `SoundProvider` — and a recording engine rather than
+ * a real one, because there is no `AudioContext` here. The layer is otherwise the production one:
+ * a screen that played a cue with no table entry would still fail to typecheck.
+ */
 function mount(api: StudioApi, node: ReactNode) {
-  return render(<StudioApiProvider api={api}>{node}</StudioApiProvider>);
+  const sound = createUISoundLayer({
+    engine: createRecordingEngine(),
+    store: createMemoryStore(),
+  });
+  return render(
+    <StudioApiProvider api={api}>
+      <SoundProvider layer={sound}>{node}</SoundProvider>
+    </StudioApiProvider>,
+  );
 }
 
 describe('라이브러리', () => {
