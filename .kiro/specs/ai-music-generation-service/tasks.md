@@ -437,7 +437,7 @@
 ## Phase 9: Public API & Integration Testing (공개 API, 통합 테스트)
 
 - [ ] 9. 공개 API 및 통합 테스트
-  - [ ] 9.1 Public_API 구현 (API 키, 레이트 리밋, 웹훅)
+  - [x] 9.1 Public_API 구현 (API 키, 레이트 리밋, 웹훅)
     - API 키 발급 (평문 1회 노출, 해시 저장)
     - Bearer 토큰 인증, 무효 키 401
     - 분당 요청 수 상한, 초과 시 429 + Retry-After

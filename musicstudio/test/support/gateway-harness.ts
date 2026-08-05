@@ -39,6 +39,7 @@ import {
   type InMemoryContentReportStore,
 } from './moderation-harness';
 import { createMutableClock, type MutableClock } from './mutable-clock';
+import { createPublicApiHarness, type PublicApiHarness } from './public-api-harness';
 import { createRecordingEmailSender, type RecordingEmailSender } from './recording-email-sender';
 import {
   createVoiceConsentHarness,
@@ -91,6 +92,7 @@ export interface GatewayHarness {
   readonly voiceConsent: GatewayVoiceConsentHarness | null;
   readonly generation: GatewayGenerationHarness | null;
   readonly lyrics: GatewayLyricsHarness | null;
+  readonly publicApi: PublicApiHarness | null;
   close(): Promise<void>;
 }
 
@@ -128,6 +130,15 @@ export interface GatewayHarnessOptions {
    * offsets, not instants.
    */
   readonly lyrics?: LyricsHarnessOptions;
+  /**
+   * Mounts the Requirement 17 API key routes and the developer surface, sharing the harness
+   * clock so the rate-limit window and a key's revocation instant are driven by the same time
+   * source the HTTP layer sees.
+   *
+   * `requestsPerMinute` is settable because the default is 60, and a test that wanted to see a
+   * 429 would otherwise have to issue 61 requests to make one assertion.
+   */
+  readonly publicApi?: { readonly requestsPerMinute?: number };
 }
 
 /**
@@ -174,6 +185,11 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
 
   const lyrics = options.lyrics === undefined ? null : createLyricsHarness(options.lyrics);
 
+  const publicApi =
+    options.publicApi === undefined
+      ? null
+      : createPublicApiHarness({ clock, ...options.publicApi });
+
   const app = buildGatewayApp({
     accountService,
     clock,
@@ -193,6 +209,17 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
     ...(lyrics === null
       ? {}
       : { lyrics: { assistant: lyrics.assistant, timedLyrics: lyrics.timedLyrics } }),
+    ...(publicApi === null
+      ? {}
+      : {
+          publicApi: {
+            apiKeys: publicApi.apiKeys,
+            rateLimiter: publicApi.rateLimiter,
+            ...(generation?.songGateway == null
+              ? {}
+              : { gateways: { song: generation.songGateway } }),
+          },
+        }),
     ...(generation === null
       ? {}
       : {
@@ -222,6 +249,7 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
     voiceConsent,
     generation,
     lyrics,
+    publicApi,
     close: () => app.close(),
   };
 }
