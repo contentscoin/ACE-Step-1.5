@@ -8,6 +8,7 @@ import {
 import { createRedisLoginAttemptStore } from '../../services/account/adapters/redis-login-attempt-store';
 import { createRedisSessionStore } from '../../services/account/adapters/redis-session-store';
 import type { OAuthProvider } from '../../services/account/oauth-provider';
+import type { CreditService } from '../../services/credit/credit-service';
 import { ReportService } from '../../services/moderation/report-service';
 
 import { ProviderRegistry } from '../../adapters/registry/provider-registry';
@@ -139,6 +140,14 @@ export interface GatewayHarnessOptions {
    * 429 would otherwise have to issue 61 requests to make one assertion.
    */
   readonly publicApi?: { readonly requestsPerMinute?: number };
+  /**
+   * Mounts the credit read routes and Requirement 17.6's `/public/v1/credits`.
+   *
+   * Passed in rather than built here because `createCreditHarness` brings its own clock and
+   * fake Redis, and a harness that owned both would decide for every test which clock the
+   * balance moves on. `test/integration/credit-routes.test.ts` composes it the same way.
+   */
+  readonly creditService?: CreditService;
 }
 
 /**
@@ -197,6 +206,7 @@ export function createGatewayHarness(options: GatewayHarnessOptions = {}): Gatew
       ? {}
       : { engines: { registry: engines.registry, adapterFactory: engines.adapterFactory } }),
     ...(moderation === null ? {} : { moderation: { reports: moderation.reports } }),
+    ...(options.creditService === undefined ? {} : { creditService: options.creditService }),
     ...(voiceConsent === null
       ? {}
       : {
@@ -276,6 +286,14 @@ export function requireGeneration(harness: GatewayHarness): GatewayGenerationHar
     throw new Error('this gateway harness was built without generation routes');
   }
   return harness.generation;
+}
+
+/** Returns the Public_API harness, or throws if the gateway was built without one. */
+export function requirePublicApi(harness: GatewayHarness): PublicApiHarness {
+  if (harness.publicApi === null) {
+    throw new Error('this gateway harness was built without the Public_API');
+  }
+  return harness.publicApi;
 }
 
 /** Returns the moderation harness, or throws if the gateway was built without one. */

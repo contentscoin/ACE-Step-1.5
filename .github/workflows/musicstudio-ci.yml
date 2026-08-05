@@ -182,8 +182,65 @@ jobs:
           cache: pip
           cache-dependency-path: musicstudio/dsp/pyproject.toml
 
+      # Task 9.3's acceptance criterion is 실패 0건·**건너뜀 0건**. `test_codecs.py`'s
+      # fallback tests shell out to an ffmpeg-compatible binary (design §5.5 makes pydub
+      # a *subprocess* dependency, not a wheel one), so without the binary they skip and
+      # the design's only redundancy for format conversion goes unexercised.
+      - name: Install the codec backend
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Install DSP dependencies
-        run: python -m pip install --upgrade pip && pip install -e '.[dev]'
+        run: python -m pip install --upgrade pip && pip install -e '.[dev,audio]'
 
       - name: Test (pytest + hypothesis)
-        run: pytest
+        # `-rs` prints the reason for anything skipped, so a skip that creeps back in is
+        # visible in the log rather than buried in the counts.
+        run: pytest -rs
+
+  # Task 9.3's acceptance criterion is "실패 0건·**건너뜀 0건**", and the migration
+  # acceptance suite is the only thing in the repository that skips: it needs a real
+  # PostgreSQL, and without one `db-schema.test.ts` skipped all 20 of its cases.
+  #
+  # That skip was not free. It hid a migration that **could not be applied at all** —
+  # `0013_effect_preset.sql` carried a CHECK constraint containing a subquery, which
+  # PostgreSQL rejects outright (`0A000`). Every pure test passed for months against SQL
+  # no server would accept. This job is what stops that recurring.
+  database:
+    name: Database migrations (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: musicstudio
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: musicstudio_test
+        ports:
+          - 5432:5432
+        # The suite connects immediately; without a health gate the first query races
+        # the server's own startup and fails on a cold runner roughly one run in five.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: musicstudio/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci || npm install
+
+      # A throwaway database, because the suite creates the whole product schema in the
+      # `public` namespace — see the header of `test/integration/db-schema.test.ts`.
+      - name: Migration acceptance
+        run: npm run test:db
+        env:
+          MUSICSTUDIO_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/musicstudio_test

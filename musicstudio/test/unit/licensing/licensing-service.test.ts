@@ -74,7 +74,12 @@ describe('the commercial gate (Reqs 33.11, 33.19, 33.23)', () => {
       records: [
         assetRecord('asset-1', {
           commercialUseAllowed: false,
-          provenance: provenance({ weightLicenseId: 'cc-by-nc-4.0' }),
+          // The provenance says so too: the stored flag is a fold over this and the
+          // lineage (`domain/commercial-use.ts`), and a record whose flag is false with
+          // every licence in reach permitting commercial use is not a state the product
+          // can reach. The deciding licences are read from provenance, so a fixture that
+          // disagreed with itself would be asserting on an impossible asset.
+          provenance: provenance({ weightLicenseId: 'cc-by-nc-4.0', commercialUseAllowed: false }),
         }),
       ],
       engines: [

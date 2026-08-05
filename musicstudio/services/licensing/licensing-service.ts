@@ -48,6 +48,7 @@ import {
   type CommercialGateRuling,
 } from '../../domain/licensing/commercial-gate';
 import { toUsagePurpose, type UsagePurpose } from '../../domain/licensing/usage-purpose';
+import { ancestorsOf } from '../../domain/lineage/graph';
 import type { AssetKind } from '../../domain/asset-kind';
 import type { AuditSinkPort } from '../../adapters/registry/ports';
 import type { Clock } from '../clock';
@@ -111,6 +112,37 @@ export function createLicensingService(options: LicensingServiceOptions) {
       .slice(0, MAX_ALTERNATIVE_ENGINES);
   }
 
+  /**
+   * Requirement 33.23's 판정 근거: the licences that actually made the flag false.
+   *
+   * Not the asset's own weight licence. A derivative restricted by Requirement 33.21 usually
+   * carries a permissive licence of its own — it is an ancestor that is not permitted — and
+   * naming the derivative's licence would tell the user a permissive identifier is the reason
+   * they were refused, which is both wrong and unactionable: they would go looking at the
+   * wrong licence and find nothing that says no.
+   *
+   * So the answer is every non-permitted licence on the asset and on its ancestors within the
+   * traversal cap, deduplicated and ordered. Ordered because it is written to an append-only
+   * audit entry (33.23) and returned in a refusal, and two identical refusals that listed the
+   * same licences in different orders would read as two different decisions.
+   */
+  async function decidingLicenseIdsFor(record: AssetLicensingRecord): Promise<readonly string[]> {
+    const graph = await lineage.graphFor(record.id);
+    const ancestorIds = [...ancestorsOf(graph, record.id)];
+    const provenance = await assets.provenanceFor([record.id, ...ancestorIds]);
+
+    const deciding = new Set<string>();
+    for (const entry of provenance.values()) {
+      if (!entry.commercialUseAllowed) deciding.add(entry.weightLicenseId);
+    }
+
+    // An ancestor whose provenance the store cannot produce is still a reason — the fold in
+    // `domain/commercial-use.ts` treats an unknown provenance as not permitted — but there is
+    // no licence identifier to name for it. Falling back to the asset's own licence would put
+    // a permissive identifier back in the list, so an empty list is the honest answer.
+    return [...deciding].sort();
+  }
+
   async function manifestFor(record: AssetLicensingRecord): Promise<AttributionManifest> {
     const graph = await lineage.graphFor(record.id);
     const ancestorIds = [...graph.parentsOf.keys(), ...graph.childrenOf.keys()];
@@ -151,7 +183,7 @@ export function createLicensingService(options: LicensingServiceOptions) {
         assetCommercialUseAllowed: record.commercialUseAllowed,
         decidingLicenseIds: record.commercialUseAllowed
           ? []
-          : [record.provenance.weightLicenseId],
+          : await decidingLicenseIdsFor(record),
         alternativeEngineIds: await alternativesFor(record.assetKind),
       });
 

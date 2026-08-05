@@ -60,13 +60,24 @@ CREATE TABLE effect_preset (
 
     -- Every item is an object carrying both keys. Structure only; the kind vocabulary
     -- and the parameter ranges are the registry's (see the header).
+    --
+    -- Written as a SQL/JSON path rather than the `NOT EXISTS (SELECT … FROM
+    -- jsonb_array_elements(chain))` it started as, because **PostgreSQL forbids a subquery
+    -- in a CHECK constraint** — `0A000: cannot use subquery in check constraint`. That is
+    -- not a preference this migration can argue with, and the original form meant migration
+    -- 0013 could never be applied. It was never caught because the migration suite is
+    -- skipped without a database, which is the thing task 9.3 stopped being true.
+    --
+    -- `jsonb_path_exists` is an ordinary function call, so it is legal here. The path finds
+    -- any element that *fails* the shape, and the constraint holds when there is none.
+    -- `!exists(@.kind)` is separate from the type test on purpose: an absent key yields no
+    -- item, so a filter that only compared types would accept `{"parameters": {}}`.
     CONSTRAINT effect_preset_chain_items_shaped CHECK (
-        NOT EXISTS (
-            SELECT 1
-            FROM jsonb_array_elements(chain) AS item
-            WHERE jsonb_typeof(item.value) <> 'object'
-               OR jsonb_typeof(item.value -> 'kind') <> 'string'
-               OR jsonb_typeof(item.value -> 'parameters') <> 'object'
+        NOT jsonb_path_exists(
+            chain,
+            '$[*] ? (@.type() != "object"
+                  || !exists(@.kind) || @.kind.type() != "string"
+                  || !exists(@.parameters) || @.parameters.type() != "object")'
         )
     ),
 

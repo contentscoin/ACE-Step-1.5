@@ -69,8 +69,13 @@ describe('Requirements 29.11, 29.13 — the chain column', () => {
   });
 
   it('requires every item to carry a kind and a parameters object', () => {
-    expect(sql).toContain("jsonb_typeof(item.value -> 'kind') <> 'string'");
-    expect(sql).toContain("jsonb_typeof(item.value -> 'parameters') <> 'object'");
+    // Expressed as a SQL/JSON path rather than a lateral subquery: PostgreSQL rejects a
+    // subquery in a CHECK with `0A000`, so the earlier form could never have been applied.
+    // See the migration's own comment, and `test/integration/db-schema.test.ts` for the
+    // constraint exercised against a real server.
+    expect(sql).toContain('NOT jsonb_path_exists(');
+    expect(sql).toContain('!exists(@.kind) || @.kind.type() != "string"');
+    expect(sql).toContain('!exists(@.parameters) || @.parameters.type() != "object"');
   });
 });
 
