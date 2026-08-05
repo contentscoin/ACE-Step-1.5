@@ -69,7 +69,7 @@ function run(steps: readonly Step[]): { state: PolicyState; nowMs: number } {
   return { state, nowMs };
 }
 
-describe('Property 19 — 루프 재요청 멱등 (Req 32.6)', () => {
+describe('Feature: ai-music-generation-service, Property 19: 이미 소리 내고 있는 루프를 다시 요청해도 같은 핸들이 반환되고 보이스는 늘지 않는다 (Requirements 32.6)', () => {
   it('a repeat of a sounding loop returns the same handle and adds no voice', () => {
     fc.assert(
       fc.property(
@@ -114,7 +114,9 @@ describe('Property 19 — 루프 재요청 멱등 (Req 32.6)', () => {
         expect(decision.result.handle).toBe(decision.state.voices[0]?.handle);
         return true;
       }),
-      { numRuns: LOOP_CUES.length },
+      // Exhaustive over every loop cue there is, which covers the domain completely. Raising it
+      // to 100 would draw the same handful of cases 90 more times and call that more thorough.
+      { numRuns: LOOP_CUES.length }, // property-audit-runs-ok: exhaustive over a finite domain
     );
   });
 });

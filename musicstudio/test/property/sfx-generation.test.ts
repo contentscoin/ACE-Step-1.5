@@ -117,7 +117,7 @@ function channelBytes(samples: Float32Array): Buffer {
   return Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
 }
 
-describe('Property 22: SFX 생성 재현성 (Requirement 22.8)', () => {
+describe('Feature: ai-music-generation-service, Property 22: 동일한 시드와 파라미터의 SFX 생성 요청은 동일한 결과를 낸다 (Requirements 22.8)', () => {
   it('asks the engine exactly the same questions for the same request', async () => {
     // The product-layer half of Requirement 22.8. Every field 22.8 names has to reach the wire in
     // the same form, in the same order, for the promise to be about anything the engine can keep.

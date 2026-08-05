@@ -76,6 +76,13 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      # Task 9.2. Fails the build when design §10 defines a Correctness Property that no
+      # test declares, when two tests declare the same one, or when a declared property
+      # runs below the 100 cases §10 requires. It reads the property list out of the design
+      # document, so a property added there is demanded here the same day.
+      - name: Property coverage audit (design §10)
+        run: npm run check:properties
+
   # The suite is sharded so that no vitest process outlives the reporting RPC's
   # timeout. A worker reports progress by awaiting `onTaskUpdate` over birpc,
   # which gives up after a hardcoded 60 s that vitest does not expose to config.
