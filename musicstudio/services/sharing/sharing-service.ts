@@ -20,12 +20,12 @@
  * false on creation would be a thing that could fail to run; nothing can fail to not insert.
  */
 
+import { visibleDisclosuresFor } from '../../domain/disclosure/ai-disclosure';
 import { isDiscoverable, toFeedQuery, feedQueryViolations, type FeedPage, type FeedQueryInput } from '../../domain/sharing/feed';
 import { applyLike, type AssetLike, type LikeOutcome } from '../../domain/sharing/like';
 import { mayRemix, remixPermission, type RemixPermission } from '../../domain/sharing/remix';
 import { shareLinkUrl, type ShareLink } from '../../domain/sharing/share-link';
 import { systemClock, type Clock } from '../clock';
-import type { DisclosurePort } from '../moderation/disclosure-port';
 import {
   sharingAssetForbidden,
   sharingAssetNotFound,
@@ -56,8 +56,6 @@ export interface SharingServiceOptions {
   readonly tokens?: ShareTokenSource;
   /** Requirement 14.2 requires the change to be recorded. */
   readonly audit?: SharingAuditPort;
-  /** Requirements 16.5, 16.13's obligations, rendered by task 8.3. */
-  readonly disclosure?: DisclosurePort;
   /** Where public links live, e.g. `https://musicstudio.example`. */
   readonly publicBaseUrl?: string;
 }
@@ -73,7 +71,6 @@ export function createSharingService(options: SharingServiceOptions) {
   const clock = options.clock ?? systemClock;
   const tokens = options.tokens ?? cryptoShareTokenSource;
   const audit = options.audit;
-  const disclosure = options.disclosure;
   const publicBaseUrl = options.publicBaseUrl ?? null;
 
   function nowMs(): number {
@@ -99,8 +96,14 @@ export function createSharingService(options: SharingServiceOptions) {
   }
 
   async function pageFor(asset: ShareableAsset): Promise<PublicAssetPage> {
-    const obligations =
-      disclosure?.obligationsFor({ assetId: asset.id, assetKind: asset.assetKind }) ?? [];
+    // Requirements 16.5 and 16.13, from the domain rather than through the port.
+    //
+    // This used to read `disclosure?.obligationsFor(...) ?? []`, and that default was the
+    // bug: a deployment that had not wired the port served every public page with no AI
+    // notice at all, which is the exact condition 16.5 forbids, arrived at by omission. Which
+    // labels a page shows is a pure function of the asset's kind, so it is called as one; the
+    // port stays for `apply`, which needs the audio.
+    const obligations = visibleDisclosuresFor(asset.assetKind);
     return publicAssetPage(
       {
         assetId: asset.id,

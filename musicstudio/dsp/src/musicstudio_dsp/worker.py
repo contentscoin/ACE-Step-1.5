@@ -111,7 +111,7 @@ celery_app.conf.update(
 def normalise_for_storage_task(
     audio_base64: str, audio_format: AudioFormat = STORAGE_FORMAT
 ) -> dict[str, Any]:
-    """Requirements 19.4, 19.5. Shell over :func:`pipeline.normalise_for_storage`."""
+    """Requirements 19.4, 19.5, 16.6. Shell over :func:`pipeline.normalise_for_storage`."""
     result = normalise_for_storage(base64.b64decode(audio_base64), audio_format)
     return {
         "audio_base64": base64.b64encode(result.data).decode("ascii"),
@@ -123,15 +123,20 @@ def normalise_for_storage_task(
         "original_duration_ms": result.original_duration_ms,
         "length_error_ms": result.length_error_ms,
         "resampled": result.resampled,
+        # Requirements 16.6, 33.14: what marked the stored copy, so the caller
+        # writes the provenance from what happened rather than from a constant.
+        "watermark_version": result.watermark_version,
     }
 
 
 @celery_app.task(name="musicstudio_dsp.convert_for_download")
 def convert_for_download_task(
-    audio_base64: str, audio_format: AudioFormat
+    audio_base64: str,
+    audio_format: AudioFormat,
+    tags: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Requirements 13.3, 13.9, 13.10. Shell over :func:`pipeline.convert_for_download`."""
-    result = convert_for_download(base64.b64decode(audio_base64), audio_format)
+    """Requirements 13.3, 13.7, 13.9, 13.10. Shell over :func:`pipeline.convert_for_download`."""
+    result = convert_for_download(base64.b64decode(audio_base64), audio_format, tags)
     return {
         "audio_base64": base64.b64encode(result.data).decode("ascii"),
         "audio_format": result.audio_format,

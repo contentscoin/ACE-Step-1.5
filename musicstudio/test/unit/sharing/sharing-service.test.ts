@@ -66,10 +66,6 @@ function harness(seed = [shareableAsset()]) {
         });
       },
     },
-    disclosure: {
-      obligationsFor: () => ['ai_generated_label'],
-      apply: async () => undefined,
-    },
   });
 
   return { sharing, assets, likes, soundPacks, tokens, clock, audited };

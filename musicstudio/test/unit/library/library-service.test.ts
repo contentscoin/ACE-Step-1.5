@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { SOFT_DELETE_RETENTION_MS } from '../../../domain/library/bounds';
-import { createDownloadService } from '../../../services/library/download-service';
+import { AI_GENERATED_TAG_VALUE } from '../../../domain/disclosure/ai-disclosure';
+import {
+  AI_GENERATED_DOWNLOAD_TAGS,
+  createDownloadService,
+} from '../../../services/library/download-service';
 import { createLibraryService } from '../../../services/library/library-service';
 import type { DownloadPayload } from '../../../services/library/ports';
 import {
@@ -19,12 +23,13 @@ import { createMutableClock } from '../../support/mutable-clock';
 
 const NOW = 1_700_000_000_000;
 
-function harness(seed = [assetRecord()]) {
+function harness(seed = [assetRecord()], options: { dropTags?: boolean } = {}) {
   const assets: InMemoryAssetStore = inMemoryAssetStore(seed);
   const playlists = inMemoryPlaylistStore();
   const clock = createMutableClock(new Date(NOW));
   const audited: { eventType: string; targetId: string }[] = [];
-  const converted: { objectKey: string; format: string }[] = [];
+  const converted: { objectKey: string; format: string; tags: Readonly<Record<string, string>> }[] =
+    [];
   let counter = 0;
 
   const library = createLibraryService({
@@ -45,8 +50,19 @@ function harness(seed = [assetRecord()]) {
     plans: { planIdFor: async (accountId) => (accountId === 'owner-1' ? 'free' : 'studio') },
     conversion: {
       convert: async (request): Promise<DownloadPayload> => {
-        converted.push({ objectKey: request.objectKey, format: request.format });
-        return { bytes: new Uint8Array([1, 2, 3]), format: request.format, sampleRate: 48_000 };
+        converted.push({
+          objectKey: request.objectKey,
+          format: request.format,
+          tags: request.tags,
+        });
+        // Echoes the tags, as a real encoder does — see `DownloadPayload.tags`. `dropTags`
+        // is the encoder that silently wrote none.
+        return {
+          bytes: new Uint8Array([1, 2, 3]),
+          format: request.format,
+          sampleRate: 48_000,
+          tags: options.dropTags === true ? {} : request.tags,
+        };
       },
     },
     archive: {
@@ -215,7 +231,31 @@ describe('download (Requirements 13.1, 13.4, 13.6, 13.10)', () => {
   it('converts even when the stored format already matches, so 13.7 s tag is applied', async () => {
     const { download, converted } = harness();
     await download.download('owner-1', 'asset-a', 'mp3');
-    expect(converted).toEqual([{ objectKey: 'audio/asset-a', format: 'mp3' }]);
+    expect(converted).toEqual([
+      { objectKey: 'audio/asset-a', format: 'mp3', tags: AI_GENERATED_DOWNLOAD_TAGS },
+    ]);
+  });
+
+  it('asks the encoder for the AI-generation tag (Requirement 13.7)', async () => {
+    const { download, converted } = harness();
+
+    await download.download('owner-1', 'asset-a', 'mp3');
+
+    expect(converted[0]?.tags).toEqual(AI_GENERATED_DOWNLOAD_TAGS);
+    expect(AI_GENERATED_DOWNLOAD_TAGS['comment']).toBe(AI_GENERATED_TAG_VALUE);
+  });
+
+  it('refuses to serve a file the encoder did not tag', async () => {
+    // The failure mode this exists for is silent: a download with no marker works perfectly.
+    // Serving it and logging would put an unmarked file in a user's hands, which cannot be
+    // taken back, so the download fails instead.
+    const { download } = harness(undefined, { dropTags: true });
+
+    await expect(download.download('owner-1', 'asset-a', 'mp3')).rejects.toMatchObject({
+      statusCode: 500,
+      code: 'library_download_tag_missing',
+      details: { field: 'comment' },
+    });
   });
 
   it('refuses lossless on a plan without the entitlement, naming the plans that have it', async () => {

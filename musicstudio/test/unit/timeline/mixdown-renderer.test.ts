@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { watermarkId } from '../../../domain/disclosure/ai-disclosure';
 import { MIXDOWN_ENGINE_ID } from '../../../services/timeline/mixdown-ports';
 import type {
   MixdownAssetWriteRequest,
@@ -29,6 +30,7 @@ const PROVENANCE: AssetProvenance = {
   nonCommercialLicenseListVersion: 1,
   recordedAtMs: 1_700_000_000_000,
   aiGenerated: true,
+  watermarkId: watermarkId(1),
 };
 
 function projectRecord(project: TimelineProject): TimelineProjectRecord {

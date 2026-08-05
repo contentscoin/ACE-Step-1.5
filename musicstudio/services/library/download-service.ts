@@ -30,9 +30,17 @@ import {
   type DownloadFormat,
 } from '../../domain/library/download';
 import { PLANS, findPlan } from '../../domain/credit/plan';
+import {
+  AI_GENERATED_TAG_FIELD,
+  AI_GENERATED_TAG_VALUE,
+} from '../../domain/disclosure/ai-disclosure';
 import type { UsagePurpose } from '../../domain/licensing/usage-purpose';
 import type { AttributionFile, LicensingService } from '../licensing/licensing-service';
-import { libraryAudioUnavailable, libraryDownloadRefused } from './errors';
+import {
+  libraryAudioUnavailable,
+  libraryDownloadRefused,
+  libraryDownloadTagMissing,
+} from './errors';
 import type {
   DownloadConversionPort,
   DownloadPayload,
@@ -75,6 +83,17 @@ export interface StemArchiveResult {
   readonly bytes: Uint8Array;
   readonly assetIds: readonly string[];
 }
+
+/**
+ * Requirement 13.7's tag, built once from the domain's wording.
+ *
+ * A constant rather than a call into `Disclosure_Service`, because it does not depend on the
+ * asset: 13.7 says 다운로드되는 오디오 파일, with no qualification by kind, owner or purpose.
+ * Routing it through a service would suggest there is a case where it differs.
+ */
+export const AI_GENERATED_DOWNLOAD_TAGS: Readonly<Record<string, string>> = {
+  [AI_GENERATED_TAG_FIELD]: AI_GENERATED_TAG_VALUE,
+};
 
 /** Requirement 13.4's "필요한 요금제": the plans whose flag is set, derived not listed. */
 export function losslessPlanIds(): readonly string[] {
@@ -215,10 +234,21 @@ export function createDownloadService(options: DownloadServiceOptions) {
     format: DownloadFormat,
   ): Promise<DownloadPayload> {
     if (record.objectKey === null) throw libraryAudioUnavailable(record.id);
-    // Conversion is the worker's (Requirement 13.3, task 3.1). It is called even when the
-    // stored format already matches, because the worker is also what applies Requirement
-    // 13.7's AI-generated metadata tag — a "no conversion needed" shortcut here would hand
-    // back a file without it.
-    return conversion.convert({ objectKey: record.objectKey, format });
+
+    // Requirement 13.7. The wording is the product's and the writing is the encoder's — see
+    // `DownloadConversionPort`. Conversion is called even when the stored format already
+    // matches, because the tag is written *by* the encode: a "no conversion needed" shortcut
+    // would hand back the stored file, and the stored file has no marker in it.
+    const tags = AI_GENERATED_DOWNLOAD_TAGS;
+    const payload = await conversion.convert({ objectKey: record.objectKey, format, tags });
+
+    // Checked rather than trusted. A download that quietly lost its marker is still a
+    // working download, which is precisely why nothing else would notice.
+    for (const [field, value] of Object.entries(tags)) {
+      if (payload.tags[field] !== value) {
+        throw libraryDownloadTagMissing({ assetId: record.id, field });
+      }
+    }
+    return payload;
   }
 }
