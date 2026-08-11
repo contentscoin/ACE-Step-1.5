@@ -46,7 +46,7 @@ const arbLike: fc.Arbitrary<AssetLike> = fc.record({
   likedAtMs: fc.integer({ min: 1_700_000_000_000, max: 1_700_000_100_000 }),
 });
 
-describe('Property 20: 좋아요 멱등 — the like set', () => {
+describe('Feature: ai-music-generation-service, Property 20: 동일한 (Audio_Asset, Account) 쌍에 좋아요를 몇 번 적용해도 좋아요는 정확히 1건으로 유지된다 (Requirements 14.7, 14.8) — the like set', () => {
   it('keeps exactly one like per (asset, account) however many times it is applied', () => {
     fc.assert(
       fc.property(fc.array(arbLike, { minLength: 1, maxLength: 60 }), (requests) => {

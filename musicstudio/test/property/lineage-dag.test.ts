@@ -98,7 +98,7 @@ function longestPathDepth(graph: LineageGraph, edges: readonly LineageEdge[]): n
   );
 }
 
-describe('Property 21: lineage DAG stays acyclic within depth 32', () => {
+describe('Feature: ai-music-generation-service, Property 21: 계보 그래프는 어떤 간선 집합을 받아들여도 순환이 없고 깊이 32를 넘지 않는다 (Requirements 19.7, 19.13)', () => {
   it('admits no edge that would create a cycle or overrun the limits', () => {
     fc.assert(
       fc.property(arbEdgeProposals, ([chainLength, extraProposals]) => {

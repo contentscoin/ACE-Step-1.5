@@ -35,6 +35,7 @@ import { ExplorePage } from './pages/ExplorePage';
 import { GeneratePage } from './pages/GeneratePage';
 import { LibraryPage } from './pages/LibraryPage';
 import { MasteringPage } from './pages/MasteringPage';
+import { PublicPage } from './pages/PublicPage';
 import { TimelinePage } from './pages/TimelinePage';
 import { chip, meta, panel, row } from './styles/ui';
 
@@ -106,6 +107,10 @@ function screenFor(name: string, parameter: string | null): ReactNode {
       return <MasteringPage assetId={parameter ?? DEFAULT_ASSET_ID} />;
     case 'explore':
       return <ExplorePage />;
+    // Requirement 14.3's visitor route. Not in `NAV`: it is reached by holding a link, and a
+    // nav entry would be a way to reach it without one.
+    case 's':
+      return <PublicPage token={parameter} />;
     case 'system':
       return <SystemPage />;
     case 'generate':

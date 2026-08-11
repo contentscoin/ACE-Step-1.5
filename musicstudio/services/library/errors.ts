@@ -109,3 +109,22 @@ export function libraryAudioUnavailable(assetId: string): GenerationError {
     { assetId },
   );
 }
+
+/**
+ * Requirement 13.7's marker did not come back in the encoded file.
+ *
+ * A 500: the request was well formed and the policy allowed it, and what failed is the
+ * product's own obligation. Refusing the download rather than serving it is the deliberate
+ * half — an unmarked file in a user's hands cannot be recalled.
+ */
+export function libraryDownloadTagMissing(details: {
+  readonly assetId: string;
+  readonly field: string;
+}): GenerationError {
+  return new GenerationError(
+    500,
+    'library_download_tag_missing',
+    'The converted file did not carry the AI-generation metadata tag.',
+    details,
+  );
+}

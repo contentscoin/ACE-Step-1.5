@@ -32,7 +32,7 @@ import type {
   EngineStatisticsPort,
 } from '../../services/generation/ports';
 import type { JobRuntime } from '../../services/generation/runtime';
-import { SongGateway } from '../../services/generation/song-gateway';
+import { SongGateway, type SongModerationPort } from '../../services/generation/song-gateway';
 
 import {
   createSourceAudioPort,
@@ -281,6 +281,13 @@ export interface GenerationHarnessOptions {
   /** Builds the Requirement 3/4 song gateway over this harness's orchestrator. */
   readonly withSongGateway?: boolean;
   /**
+   * Composes that gateway with a Moderation_Service (Requirement 16.2).
+   *
+   * `createModerationHarness().moderation` satisfies it, which is how a test gets the
+   * real classifier rather than a canned verdict.
+   */
+  readonly moderation?: SongModerationPort;
+  /**
    * Builds the Requirement 7 edit gateway, and wraps asset publication so an
    * Edit_Task's results get their Requirement 7.12 lineage.
    */
@@ -336,6 +343,7 @@ export function createGenerationHarness(
   const statistics: EngineStatisticsPort = { averageDurationMs: () => average };
 
   let counter = 0;
+  let moderationRequests = 0;
   const runtime: JobRuntime = {
     registry,
     store,
@@ -371,7 +379,23 @@ export function createGenerationHarness(
     adapter,
     registeredAdapter,
     songGateway:
-      options.withSongGateway === true ? new SongGateway({ orchestrator, assetKind }) : null,
+      options.withSongGateway === true
+        ? new SongGateway({
+            orchestrator,
+            assetKind,
+            ...(options.moderation === undefined
+              ? {}
+              : {
+                  moderation: {
+                    service: options.moderation,
+                    newRequestId: () => {
+                      moderationRequests += 1;
+                      return `moderation-${String(moderationRequests)}`;
+                    },
+                  },
+                }),
+          })
+        : null,
     editGateway:
       options.withEditGateway === true
         ? new EditGateway({ orchestrator, sourceAudio, catalogue: TEST_EDIT_MODEL_CATALOGUE })

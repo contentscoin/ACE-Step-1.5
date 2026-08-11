@@ -1,14 +1,15 @@
-import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fastify';
+import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 
 import { attachJobEventStream, formatSseFrame, jobEventFrame, SSE_HEADERS } from '../../sse/event-stream';
 import type { Clock } from '../../../services/clock';
 import type { AssetKind } from '../../../domain/asset-kind';
 import type { InputModality } from '../../../adapters/normalized-generation';
 import type { JobEventBusPort } from '../../../services/generation/job-events';
-import type { JobOrchestrator, SubmitJobInput, SubmitOutcome } from '../../../services/generation/job-orchestrator';
+import type { JobOrchestrator, SubmitJobInput } from '../../../services/generation/job-orchestrator';
 import { jobStatusEvent } from '../../../services/generation/job-status';
 import type { JobRuntime } from '../../../services/generation/runtime';
 import { requireAccount } from '../authentication';
+import { presentSubmitOutcome } from '../presenters';
 import {
   cancelGenerationJobSchema,
   getGenerationJobSchema,
@@ -60,7 +61,7 @@ export function registerGenerationRoutes(
     async (request, reply) => {
       const actor = requireAccount(request);
       const outcome = await orchestrator.submit(submitInputOf(request.body, actor.accountId));
-      return renderSubmitOutcome(reply, outcome);
+      return presentSubmitOutcome(reply, outcome);
     },
   );
 
@@ -90,7 +91,7 @@ export function registerGenerationRoutes(
     { schema: retryGenerationJobSchema, preHandler: options.authenticate },
     async (request, reply) => {
       const actor = requireAccount(request);
-      return renderSubmitOutcome(reply, await orchestrator.retry(request.params.jobId, actor.accountId));
+      return presentSubmitOutcome(reply, await orchestrator.retry(request.params.jobId, actor.accountId));
     },
   );
 
@@ -140,39 +141,6 @@ export function registerGenerationRoutes(
   );
 }
 
-/**
- * Requirement 6.1: a job the engine refused is a 422 carrying the classification
- * and retryability, not a 500. The status code distinguishes "your request was
- * accepted and then failed" from "your request was malformed".
- */
-function renderSubmitOutcome(reply: FastifyReply, outcome: SubmitOutcome): FastifyReply {
-  if (outcome.kind === 'accepted') {
-    return reply.code(202).send(outcome.acceptance);
-  }
-
-  if (outcome.kind === 'failed') {
-    return reply.code(422).send({
-      error: {
-        code: 'generation_job_failed',
-        message: 'The engine did not accept the Generation_Job.',
-        jobId: outcome.jobId,
-        classification: outcome.failure.classification,
-        retryable: outcome.failure.retryable,
-        reason: outcome.failure.reason,
-      },
-    });
-  }
-
-  // Requirements 16.2/16.11: blocked before anything could charge.
-  return reply.code(403).send({
-    error: {
-      code: 'blocked_by_moderation',
-      message: 'The request was blocked by the content policy.',
-      blockCodes: outcome.decision.blocks.map((block) => block.code),
-      violationClasses: outcome.decision.violationClasses,
-    },
-  });
-}
 
 function submitInputOf(body: SubmitBody, accountId: string): SubmitJobInput {
   return {

@@ -184,6 +184,8 @@ export type GenerationErrorCode =
   | 'library_download_refused'
   /** The asset exists but its audio does not — purged, or never stored. */
   | 'library_audio_unavailable'
+  /** Requirement 13.7 — the encoder did not write the AI-generation tag. */
+  | 'library_download_tag_missing'
   /** Requirement 12.1 — no such Audio_Asset to play. */
   | 'playback_asset_not_found'
   /**
@@ -246,7 +248,20 @@ export type GenerationErrorCode =
   /** Requirement 34.5 — carries the adjustable range; the stored value is unchanged. */
   | 'quality_threshold_out_of_range'
   /** Requirement 18.9 — diagnostics for a job that does not exist. */
-  | 'admin_job_not_found';
+  | 'admin_job_not_found'
+  /** Requirement 16.6 — the stored audio does not carry the AI-generation mark. */
+  | 'disclosure_watermark_missing'
+  /**
+   * Requirement 17.4 — one code for missing, malformed, unknown and revoked.
+   *
+   * Splitting them would answer the question an attacker holding a candidate key is asking.
+   */
+  | 'public_api_key_invalid'
+  /** Requirement 17.8 — carries the retry time, not only a duration. */
+  | 'public_api_rate_limited'
+  | 'public_api_key_not_found'
+  | 'public_api_webhook_invalid'
+  | 'public_api_key_label_invalid';
 
 export class GenerationError extends Error {
   readonly statusCode: number;

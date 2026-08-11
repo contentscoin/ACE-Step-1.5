@@ -1,12 +1,12 @@
-import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fastify';
+import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 
 import type {
   CustomModeSongRequest,
   SimpleModeSongRequest,
 } from '../../../domain/song/request';
-import type { SubmitOutcome } from '../../../services/generation/job-orchestrator';
 import type { SongGateway } from '../../../services/generation/song-gateway';
 import { requireAccount } from '../authentication';
+import { presentSubmitOutcome } from '../presenters';
 import { createCustomSongSchema, createSimpleSongSchema } from '../schemas/song-schemas';
 
 /**
@@ -43,7 +43,7 @@ export function registerSongRoutes(app: FastifyInstance, options: SongRouteOptio
         request: { mode: 'simple', ...body },
         ...(engineId === undefined ? {} : { engineId }),
       });
-      return renderOutcome(reply, outcome);
+      return presentSubmitOutcome(reply, outcome);
     },
   );
 
@@ -59,40 +59,7 @@ export function registerSongRoutes(app: FastifyInstance, options: SongRouteOptio
         request: { mode: 'custom', ...body },
         ...(engineId === undefined ? {} : { engineId }),
       });
-      return renderOutcome(reply, outcome);
+      return presentSubmitOutcome(reply, outcome);
     },
   );
-}
-
-/**
- * Same three outcomes the generic submit endpoint renders, for the same reasons:
- * 202 accepted, 422 for an engine that refused (Requirement 6.1), 403 for a
- * moderation block (Requirements 16.2, 16.11).
- */
-function renderOutcome(reply: FastifyReply, outcome: SubmitOutcome): FastifyReply {
-  if (outcome.kind === 'accepted') {
-    return reply.code(202).send(outcome.acceptance);
-  }
-
-  if (outcome.kind === 'failed') {
-    return reply.code(422).send({
-      error: {
-        code: 'generation_job_failed',
-        message: 'The engine did not accept the Generation_Job.',
-        jobId: outcome.jobId,
-        classification: outcome.failure.classification,
-        retryable: outcome.failure.retryable,
-        reason: outcome.failure.reason,
-      },
-    });
-  }
-
-  return reply.code(403).send({
-    error: {
-      code: 'blocked_by_moderation',
-      message: 'The request was blocked by the content policy.',
-      blockCodes: outcome.decision.blocks.map((block) => block.code),
-      violationClasses: outcome.decision.violationClasses,
-    },
-  });
 }

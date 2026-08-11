@@ -70,7 +70,12 @@ function build(options: { readonly commercialUseAllowed: boolean; readonly plan?
     conversion: {
       convert: async (request): Promise<DownloadPayload> => {
         converted.push(request.objectKey);
-        return { bytes: new Uint8Array([1, 2, 3]), format: request.format, sampleRate: 48_000 };
+        return {
+          bytes: new Uint8Array([1, 2, 3]),
+          format: request.format,
+          sampleRate: 48_000,
+          tags: request.tags,
+        };
       },
     },
     archive: { archive: async () => new Uint8Array([9]) },

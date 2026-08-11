@@ -79,6 +79,15 @@ export interface DownloadConversionPort {
   convert(request: {
     readonly objectKey: string;
     readonly format: DownloadFormat;
+    /**
+     * Requirement 13.7's metadata tags.
+     *
+     * They arrive as an argument because only the encoder can write them — the tag lives
+     * inside the encoded bytes — while the wording is the product's
+     * (`domain/disclosure/ai-disclosure.ts`). `convert_for_download` in the DSP worker takes
+     * the same argument for the same reason.
+     */
+    readonly tags: Readonly<Record<string, string>>;
   }): Promise<DownloadPayload>;
 }
 
@@ -87,6 +96,15 @@ export interface DownloadPayload {
   readonly format: DownloadFormat;
   /** Requirement 13.10 — always 48 kHz, asserted at the seam rather than assumed. */
   readonly sampleRate: number;
+  /**
+   * The tags the encoder actually wrote back into the file, read back from it.
+   *
+   * Required, not optional, and that is the whole value of the field: the failure mode of
+   * Requirement 13.7 is silent — a download with no marker is still a working download — so
+   * an implementation that could omit this would be an implementation that never gets
+   * checked. `download-service.ts` compares it with what it asked for.
+   */
+  readonly tags: Readonly<Record<string, string>>;
 }
 
 /** Requirement 13.5's archive. Built by the caller's storage layer, not by this service. */

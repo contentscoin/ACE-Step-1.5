@@ -345,6 +345,26 @@ export function createDemoApi(options: DemoApiOptions = {}): StudioApi {
       return shareStateOf(assetId);
     },
 
+    async publicPage(token) {
+      // Requirement 14.4: the token is looked up, and a revoked publication has no row, so a
+      // stale link answers with nothing rather than with a page for a private asset.
+      const entry = [...published.entries()].find(([, value]) => value.token === token);
+      if (entry === undefined) return null;
+      const asset = assets.get(entry[0]);
+      if (asset === undefined || asset.isDeleted) return null;
+
+      return {
+        title: asset.name,
+        caption: asset.caption,
+        assetId: asset.id,
+        assetKind: asset.assetKind,
+        durationMs: asset.durationMs,
+        isLoop: asset.isLoop,
+        likeCount: countFor(likes, asset.id),
+        remixAllowed: entry[1].remixAllowed,
+      };
+    },
+
     async feed(query: FeedQueryInput): Promise<FeedPage> {
       return applyFeedQuery([...assets.values()].map(feedRow), toFeedQuery(query));
     },

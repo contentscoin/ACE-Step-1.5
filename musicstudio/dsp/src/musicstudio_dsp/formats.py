@@ -66,6 +66,7 @@ __all__ = [
     "LOSSLESS_FORMATS",
     "LOSSLESS_TOLERANCE",
     "SFX_DOWNLOAD_FORMATS",
+    "TAG_FIELDS",
     "AudioFormat",
     "ConversionReport",
     "UnsupportedFormatError",
@@ -73,6 +74,7 @@ __all__ = [
     "decode",
     "encode",
     "is_lossless",
+    "read_tags",
 ]
 
 AudioFormat = Literal["mp3", "wav", "flac", "ogg"]
@@ -96,6 +98,19 @@ EXPORT_SUBTYPES: Final[Mapping[AudioFormat, tuple[str, str]]] = {
     "mp3": ("MP3", "MPEG_LAYER_III"),
     "ogg": ("OGG", "VORBIS"),
 }
+
+
+#: Container metadata fields this module will write, and the only ones.
+#:
+#: Requirement 13.7 puts an AI-generation marker in the download's tags, and the
+#: *wording* of that marker is the product layer's — ``domain/disclosure`` owns
+#: it. What is decided here is which containers can carry it, which is a
+#: property of ``libsndfile`` rather than of the product: measured against 1.2.2,
+#: ``comment`` and ``title`` survive all four formats, while ``software`` is
+#: rewritten by the library on the way out ("… (libsndfile-1.2.2)") and dropped
+#: entirely by the MP3 writer. So the marker rides in ``comment``, and a tag the
+#: caller cannot rely on is not offered at all.
+TAG_FIELDS: Final[tuple[str, ...]] = ("title", "artist", "comment")
 
 
 class UnsupportedFormatError(ValueError):
@@ -123,27 +138,68 @@ def _validated(audio_format: str) -> AudioFormat:
     return audio_format  # type: ignore[return-value]
 
 
-def encode(audio: AudioBuffer, audio_format: AudioFormat) -> bytes:
+def encode(
+    audio: AudioBuffer,
+    audio_format: AudioFormat,
+    tags: Mapping[str, str] | None = None,
+) -> bytes:
     """Encode ``audio`` into ``audio_format``, 24-bit for the lossless pair.
 
     The buffer's own sample rate is written, not the internal rate: encoding is
     a container concern, and forcing 48 kHz here would silently resample without
     reporting the length error Requirement 19.5 wants measured. :func:`convert`
     is the entry point that normalises the rate first.
+
+    ``tags`` are written into the container's metadata. Only the encoder can do
+    this — the tag lives inside the encoded bytes — so the *writing* is here and
+    the *wording* stays with the caller. Keys outside :data:`TAG_FIELDS` are
+    rejected rather than ignored, because a metadata field that silently does
+    not arrive is the failure mode Requirement 13.7 is exposed to: the download
+    still works, and the marker is simply absent.
     """
     container, subtype = EXPORT_SUBTYPES[_validated(audio_format)]
     if not audio.is_well_formed:
         raise ValueError("cannot encode a buffer that is not well formed")
 
+    written = dict(tags or {})
+    unknown = sorted(set(written) - set(TAG_FIELDS))
+    if unknown:
+        raise ValueError(
+            f"unsupported metadata field(s) {', '.join(unknown)}; "
+            f"supported: {', '.join(TAG_FIELDS)}"
+        )
+
     target = io.BytesIO()
-    sf.write(
+    with sf.SoundFile(
         target,
-        to_interleaved(audio),
-        audio.sample_rate,
+        mode="w",
+        samplerate=audio.sample_rate,
+        channels=audio.channel_count,
         format=container,
         subtype=subtype,
-    )
+    ) as handle:
+        # Before the samples: libsndfile flushes the header on the first write
+        # for some containers, and a tag set afterwards would not reach the file.
+        for field, value in written.items():
+            setattr(handle, field, value)
+        handle.write(to_interleaved(audio))
     return target.getvalue()
+
+
+def read_tags(data: bytes) -> dict[str, str]:
+    """The metadata fields of :data:`TAG_FIELDS` present in ``data``.
+
+    Absent fields are omitted rather than reported as empty strings, so a caller
+    checking Requirement 13.7's marker is asking "is it there" and not "is it
+    there and non-empty".
+    """
+    with sf.SoundFile(io.BytesIO(data)) as handle:
+        found = {}
+        for field in TAG_FIELDS:
+            value = getattr(handle, field, None)
+            if value:
+                found[field] = str(value)
+        return found
 
 
 def decode(data: bytes) -> AudioBuffer:
@@ -182,6 +238,7 @@ def convert(
     data: bytes,
     audio_format: AudioFormat,
     target_sample_rate: int = INTERNAL_SAMPLE_RATE,
+    tags: Mapping[str, str] | None = None,
 ) -> ConversionReport:
     """Requirement 13.3: re-encode stored bytes into the requested format.
 
@@ -189,12 +246,17 @@ def convert(
     Requirement 19.5, then encode. The rate normalisation is inside the
     conversion rather than beside it because Requirement 13.10 admits no
     exception: a download is 48 kHz whatever the stored asset was.
+
+    Tags of the *source* are not carried over. A converted download is a new
+    file and its metadata is whatever the caller asks for; inheriting the stored
+    copy's tags would mean a download's marker depended on how the asset was
+    stored rather than on Requirement 13.7.
     """
     requested = _validated(audio_format)
     decoded = decode(data)
     report = normalise_sample_rate_strict(decoded, target_sample_rate)
     return ConversionReport(
-        data=encode(report.audio, requested),
+        data=encode(report.audio, requested, tags),
         audio_format=requested,
         audio=report.audio,
         resample=report,

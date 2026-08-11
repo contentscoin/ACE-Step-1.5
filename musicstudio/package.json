@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:property": "vitest run test/property",
     "test:db": "vitest run test/integration/db-schema.test.ts",
-    "check:boundary": "eslint . && python3 dsp/scripts/check_import_boundary.py"
+    "check:boundary": "eslint . && python3 dsp/scripts/check_import_boundary.py",
+    "check:properties": "node scripts/audit-properties.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

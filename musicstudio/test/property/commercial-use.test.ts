@@ -59,7 +59,7 @@ const arbScenario = fc
     self: new Map(assetIds.map((id) => [id, flags[id] ?? false])),
   }));
 
-describe('Property 18: commercial-use propagation', () => {
+describe('Feature: ai-music-generation-service, Property 18: 상업적 사용 허용 여부가 거짓인 조상이 계보 깊이 32 이하에 존재하는 모든 Audio_Asset의 상업적 사용 허용 여부는 거짓이다 (Requirements 33.21)', () => {
   it('never marks an asset permitted when an ancestor is not', () => {
     fc.assert(
       fc.property(arbScenario, ({ graph, self }) => {

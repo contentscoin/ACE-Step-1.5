@@ -1,6 +1,7 @@
 import Fastify, { LogController, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 
 import type { EngineAdapterFactoryPort } from '../../adapters/registry/ports';
+import type { AssetKind } from '../../domain/asset-kind';
 import type { ProviderRegistry } from '../../adapters/registry/provider-registry';
 import type { AccountService } from '../../services/account/account-service';
 import { systemClock, type Clock } from '../../services/clock';
@@ -13,13 +14,21 @@ import type { SongGateway } from '../../services/generation/song-gateway';
 import type { LyricsAssistant } from '../../services/lyrics/lyrics-assistant';
 import type { TimedLyricsService } from '../../services/lyrics/timed-lyrics-service';
 import type { ReportService } from '../../services/moderation/report-service';
+import type { ApiKeyService } from '../../services/public-api/api-key-service';
+import type { RateLimiter } from '../../services/public-api/rate-limiter';
 import type { ConsentService } from '../../services/voice/consent-service';
 import type { ProfileAccessService } from '../../services/voice/profile-access-service';
 import type { WithdrawalService } from '../../services/voice/withdrawal-service';
 
 import { createAuthenticationHook, registerAuthenticationDecorator } from './authentication';
 import { registerErrorHandler } from './error-handler';
+import {
+  createApiKeyAuthenticationHook,
+  createRateLimitHook,
+  registerApiKeyDecorator,
+} from './public-api-authentication';
 import { registerAccountRoutes } from './routes/account-routes';
+import { registerApiKeyRoutes } from './routes/api-key-routes';
 import { registerAuthRoutes } from './routes/auth-routes';
 import { registerCreditRoutes } from './routes/credit-routes';
 import { registerEditRoutes } from './routes/edit-routes';
@@ -27,10 +36,21 @@ import { registerEngineRoutes } from './routes/engine-routes';
 import { registerGenerationRoutes } from './routes/generation-routes';
 import { registerLyricsRoutes } from './routes/lyrics-routes';
 import { registerModerationRoutes } from './routes/moderation-routes';
+import { registerPublicApiRoutes } from './routes/public-api-routes';
 import { registerSongRoutes } from './routes/song-routes';
 import { registerVoiceConsentRoutes } from './routes/voice-consent-routes';
 
 export const API_PREFIX = '/v1';
+
+/**
+ * The developer surface of Requirement 17, mounted separately from `/v1`.
+ *
+ * A separate prefix rather than the same one, because the two are authenticated differently —
+ * a session cookie/JWT under `/v1`, an API key here — and mounting them together would mean one
+ * route table where the credential a route accepts is a property of which hook someone
+ * remembered to attach. A prefix makes it a property of the address.
+ */
+export const PUBLIC_API_PREFIX = '/public/v1';
 
 /**
  * Provider_Registry wiring is optional: an auth-only gateway is still a valid
@@ -112,6 +132,23 @@ export interface GatewayVoiceConsentDependencies {
   readonly access: ProfileAccessService;
 }
 
+/**
+ * Public_API wiring (Requirement 17), optional like every other block.
+ *
+ * The key service and the rate limiter travel together: a developer surface without a limiter
+ * would satisfy 17.3 and silently drop 17.7, and the two are attached to the same routes as one
+ * ordered pair of hooks — see `public-api-authentication.ts` for why the order matters.
+ *
+ * `gateways` is per Asset_Kind so the route table is derived from what is actually composed:
+ * Requirement 17.11 wants four separate endpoints, and a kind with no gateway gets no endpoint
+ * rather than a route that answers 500.
+ */
+export interface GatewayPublicApiDependencies {
+  readonly apiKeys: ApiKeyService;
+  readonly rateLimiter: RateLimiter;
+  readonly gateways?: Partial<Record<AssetKind, SongGateway>>;
+}
+
 export interface GatewayDependencies {
   readonly accountService: AccountService;
   readonly clock?: Clock;
@@ -125,6 +162,8 @@ export interface GatewayDependencies {
   readonly generation?: GatewayGenerationDependencies;
   /** Mounts the Requirement 2.7 / 2.9–2.11 credit read routes when supplied. */
   readonly creditService?: CreditService;
+  /** Mounts the Requirement 17 API key routes and the developer surface when supplied. */
+  readonly publicApi?: GatewayPublicApiDependencies;
   readonly fastifyOptions?: FastifyServerOptions;
 }
 
@@ -148,6 +187,7 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
 
   registerErrorHandler(app);
   registerAuthenticationDecorator(app);
+  registerApiKeyDecorator(app);
   const authenticate = createAuthenticationHook(deps.accountService);
 
   app.get('/health', async () => ({ status: 'ok' }));
@@ -177,6 +217,11 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
       if (deps.creditService !== undefined) {
         registerCreditRoutes(scope, { creditService: deps.creditService, authenticate });
       }
+      if (deps.publicApi !== undefined) {
+        // Issuing a key is a signed-in action, not an API-key one: minting a credential with a
+        // credential means a leaked key can mint its own successors.
+        registerApiKeyRoutes(scope, { apiKeys: deps.publicApi.apiKeys, authenticate });
+      }
       if (deps.lyrics !== undefined) {
         registerLyricsRoutes(scope, {
           assistant: deps.lyrics.assistant,
@@ -204,6 +249,27 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
     },
     { prefix: API_PREFIX },
   );
+
+  if (deps.publicApi !== undefined && deps.generation !== undefined) {
+    const publicApi = deps.publicApi;
+    const generation = deps.generation;
+    app.register(
+      async (scope) => {
+        registerPublicApiRoutes(scope, {
+          // Order matters: authenticate, then count. See `public-api-authentication.ts`.
+          preHandlers: [
+            createApiKeyAuthenticationHook(publicApi.apiKeys),
+            createRateLimitHook(publicApi.rateLimiter),
+          ],
+          orchestrator: generation.orchestrator,
+          gateways: publicApi.gateways ?? {},
+          ...(deps.creditService === undefined ? {} : { creditService: deps.creditService }),
+          ...(deps.engines === undefined ? {} : { registry: deps.engines.registry }),
+        });
+      },
+      { prefix: PUBLIC_API_PREFIX },
+    );
+  }
 
   return app;
 }

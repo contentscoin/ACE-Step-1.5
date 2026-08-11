@@ -167,7 +167,6 @@ const sharing = createSharingService({
       audited.push(`${event.eventType}(${event.targetId})`);
     },
   },
-  disclosure: { obligationsFor: () => ['ai_generated_label'], apply: async () => undefined },
 });
 
 // --- Playback (5.2), gated by the *sharing* service's own visibility answer

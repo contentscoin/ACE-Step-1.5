@@ -57,6 +57,24 @@ export interface StudioVersion {
   readonly createdAtMs: number;
 }
 
+/**
+ * Requirement 14.3's four groups: 제목, 캡션, 재생, AI 생성 표기.
+ *
+ * Nothing here identifies the owner. Publishing one asset should not publish a little of
+ * everything else the account holds, and the field that would do that is an account id sitting
+ * quietly in a payload nobody reads.
+ */
+export interface PublicAssetPage {
+  readonly title: string;
+  readonly caption: string;
+  readonly assetId: string;
+  readonly assetKind: AssetKind;
+  readonly durationMs: number;
+  readonly isLoop: boolean;
+  readonly likeCount: number;
+  readonly remixAllowed: boolean;
+}
+
 export interface ShareState {
   readonly published: boolean;
   readonly url: string | null;
@@ -101,6 +119,14 @@ export interface StudioApi {
   /** Requirements 14.2, 14.4. */
   setPublished(assetId: string, published: boolean, remixAllowed: boolean): Promise<ShareState>;
   shareState(assetId: string): Promise<ShareState>;
+  /**
+   * Requirement 14.3 — what an *unauthenticated* visitor holding a link is shown, and 14.4's
+   * `null` for a link that has been revoked.
+   *
+   * Keyed by token rather than by asset id, because that is the only thing the visitor has;
+   * a signature taking an asset id would be a screen that could be reached without a link.
+   */
+  publicPage(token: string): Promise<PublicAssetPage | null>;
   /** Requirements 14.5, 14.6. */
   feed(query: FeedQueryInput): Promise<FeedPage>;
   /** Requirements 14.7, 14.8. */

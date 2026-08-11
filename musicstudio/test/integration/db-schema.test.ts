@@ -2,6 +2,7 @@ import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { applyMigrations, loadMigrations, type SqlExecutor } from '../../db/runner';
+import { watermarkId } from '../../domain/disclosure/ai-disclosure';
 import { partitionFor, partitionsFrom } from '../../domain/audit-log/partition';
 
 /**
@@ -24,6 +25,7 @@ const provenance = {
   nonCommercialLicenseListVersion: 1,
   recordedAtMs: 1_800_000_000_000,
   aiGenerated: true,
+  watermarkId: watermarkId(1),
   qualityThresholdSetVersion: 4,
 };
 

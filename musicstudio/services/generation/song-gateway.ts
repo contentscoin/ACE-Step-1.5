@@ -12,6 +12,7 @@
  */
 
 import type { AssetKind } from '../../domain/asset-kind';
+import type { ModerationField } from '../../domain/moderation/fields';
 import type { SongGenerationRequest, SongParameters } from '../../domain/song/request';
 import {
   SONG_DURATION_BOUNDS,
@@ -56,8 +57,46 @@ export interface PersonaAdapterResolver {
   resolveAdapter(personaId: string, requesterId: string): Promise<string>;
 }
 
+/**
+ * Requirement 16.1's text inspection, narrowed to the one call the gateway makes.
+ *
+ * Structurally satisfied by `ModerationService`, without this module importing it — the
+ * same shape every other cross-service port in `services/generation` takes.
+ */
+export interface SongModerationPort {
+  inspect(request: {
+    readonly accountId: string;
+    readonly requestId: string;
+    readonly texts: readonly { readonly field: ModerationField; readonly value: string }[];
+  }): ModerationDecision;
+}
+
+/**
+ * The Moderation_Service and the identifier its block audit is correlated by.
+ *
+ * `newRequestId` is separate because the Generation_Job does not exist yet when the
+ * verdict is taken — that is the whole point of the ordering in design §9.1 — so the
+ * job id cannot be the correlation key. Requirement 16.7's audit entry needs one
+ * regardless (§11.2), and minting it here keeps the gateway free of a clock or a
+ * counter of its own.
+ */
+export interface SongModerationOptions {
+  readonly service: SongModerationPort;
+  readonly newRequestId: () => string;
+}
+
 export interface SongGatewayOptions {
   readonly orchestrator: JobOrchestrator;
+  /**
+   * Inspects the request's text before anything can charge for it (Requirement 16.2).
+   *
+   * Optional, like every other collaborator here: a composition without a
+   * Moderation_Service submits without a verdict and the orchestrator approves
+   * nothing, which is the pre-Requirement-16 behaviour. Wiring it is what makes the
+   * 403 path reachable from the HTTP surface rather than only from a caller that
+   * passes its own `moderate` thunk.
+   */
+  readonly moderation?: SongModerationOptions;
   /** Requirement 15.5. Omitted in compositions with no Persona_Service. */
   readonly personas?: PersonaAdapterResolver;
   /** `song` for Requirements 3 and 4; task 2.4 reuses the gateway with `bgm`. */
@@ -78,7 +117,13 @@ export interface SongSubmissionInput {
   readonly request: SongGenerationRequest;
   /** Engine named by the caller (Requirement 20.3). */
   readonly engineId?: string;
-  /** Content policy verdict, evaluated lazily by the orchestrator (design §9.1). */
+  /**
+   * Content policy verdict, evaluated lazily by the orchestrator (design §9.1).
+   *
+   * Overrides the gateway's own Moderation_Service when both are present, so a caller
+   * that has already inspected the text — the Requirement 16.10 speech path does — is
+   * not inspected a second time under a different request id.
+   */
   readonly moderate?: () => ModerationDecision;
   /** Requirement 15.5: the persona to generate in. Refused by 15.6 if not the caller's. */
   readonly personaId?: string;
@@ -87,6 +132,7 @@ export interface SongSubmissionInput {
 export class SongGateway {
   private readonly orchestrator: JobOrchestrator;
   private readonly personas: PersonaAdapterResolver | null;
+  private readonly moderation: SongModerationOptions | null;
   private readonly assetKind: AssetKind;
   private readonly reservedLengthSeconds: number;
   private readonly durationBounds: SongDurationBounds;
@@ -94,6 +140,7 @@ export class SongGateway {
   constructor(options: SongGatewayOptions) {
     this.orchestrator = options.orchestrator;
     this.personas = options.personas ?? null;
+    this.moderation = options.moderation ?? null;
     this.assetKind = options.assetKind ?? 'song';
     this.reservedLengthSeconds =
       options.reservedLengthSeconds ?? UNSPECIFIED_LENGTH_RESERVATION_SECONDS;
@@ -149,9 +196,55 @@ export class SongGateway {
       ...promptOf(song),
       ...(song.seed === undefined ? {} : { seed: song.seed }),
       ...(input.engineId === undefined ? {} : { engineId: input.engineId }),
-      ...(input.moderate === undefined ? {} : { moderate: input.moderate }),
+      ...this.moderationOf(input, song),
     };
   }
+
+  /**
+   * The verdict thunk the orchestrator runs inside its gate.
+   *
+   * Lazy for the reason design §9.1 gives, and lazy here too: the request id is minted
+   * inside the thunk, so a submission that never reaches the gate — routing refuses it
+   * first — leaves no gap in the correlation sequence.
+   */
+  private moderationOf(
+    input: SongSubmissionInput,
+    song: SongParameters,
+  ): { readonly moderate?: () => ModerationDecision } {
+    if (input.moderate !== undefined) return { moderate: input.moderate };
+
+    const moderation = this.moderation;
+    if (moderation === null) return {};
+
+    const texts = moderationTextsOf(song);
+    return {
+      moderate: () =>
+        moderation.service.inspect({
+          accountId: input.accountId,
+          requestId: moderation.newRequestId(),
+          texts,
+        }),
+    };
+  }
+}
+
+/**
+ * Requirement 16.1's three fields, as they appear on a song request.
+ *
+ * Only the ones the caller actually wrote: an absent caption is not an empty caption,
+ * and inspecting `''` would put a field in the audited decision that the user never
+ * submitted.
+ */
+function moderationTextsOf(
+  song: SongParameters,
+): readonly { readonly field: ModerationField; readonly value: string }[] {
+  const texts: { readonly field: ModerationField; readonly value: string }[] = [];
+
+  if (song.description !== undefined) texts.push({ field: 'description', value: song.description });
+  if (song.caption !== undefined) texts.push({ field: 'caption', value: song.caption });
+  if (song.lyrics !== undefined) texts.push({ field: 'lyrics', value: song.lyrics });
+
+  return texts;
 }
 
 function promptOf(song: SongParameters): { readonly prompt?: string } {

@@ -6,6 +6,8 @@
  * updates to the column.
  */
 
+import { watermarkVersionOf } from './disclosure/ai-disclosure';
+
 /** Recorded where a source requires no attribution (Req 33.1). */
 export const NO_ATTRIBUTION_REQUIRED = 'none';
 
@@ -26,12 +28,19 @@ export interface AssetProvenance {
   readonly recordedAtMs: number;
   /** AI generation marker, always present (Req 33.14). */
   readonly aiGenerated: true;
+  /**
+   * The inaudible mark the stored audio carries (Requirements 16.6, 33.14).
+   *
+   * Required, not optional. 33.14 is written as an invariant — 모든 Audio_Asset의 출처 정보에
+   * … 워터마크 정보와 AI 생성 표기를 **함께** 유지한다 — and an invariant whose field can be
+   * omitted is a convention. `aiGenerated` is `true` rather than `boolean` for the same reason;
+   * this is the other half of that pair. `domain/disclosure/ai-disclosure.ts` writes the value.
+   */
+  readonly watermarkId: string;
   /** Engine sample rate before normalisation to 48 kHz (Req 19.5). */
   readonly originalSampleRate?: number;
   /** Quality_Threshold_Set version used to admit the asset (Req 34.6). */
   readonly qualityThresholdSetVersion?: number;
-  /** Inaudible watermark descriptor (Req 16.5, 33.14). */
-  readonly watermarkId?: string;
 }
 
 export type ProvenanceViolation =
@@ -41,7 +50,8 @@ export type ProvenanceViolation =
   | 'non_commercial_license_list_version_range'
   | 'recorded_at_ms_range'
   | 'original_sample_rate_range'
-  | 'quality_threshold_set_version_range';
+  | 'quality_threshold_set_version_range'
+  | 'watermark_id_unrecognised';
 
 export function validateProvenance(provenance: AssetProvenance): ProvenanceViolation[] {
   const violations: ProvenanceViolation[] = [];
@@ -60,6 +70,12 @@ export function validateProvenance(provenance: AssetProvenance): ProvenanceViola
     violations.push('non_commercial_license_list_version_range');
   }
   if (!isPositiveInteger(provenance.recordedAtMs)) violations.push('recorded_at_ms_range');
+
+  // Requirement 33.14: the field is required by the type, and a value that names no scheme
+  // is the way an empty string gets past a required field.
+  if (watermarkVersionOf(provenance.watermarkId) === null) {
+    violations.push('watermark_id_unrecognised');
+  }
 
   const { originalSampleRate, qualityThresholdSetVersion } = provenance;
   if (originalSampleRate !== undefined && !isPositiveInteger(originalSampleRate)) {

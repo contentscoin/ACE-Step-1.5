@@ -1,22 +1,23 @@
 """The ``pydub``/``ffmpeg`` fallback boundary of design §5.5.
 
-This environment has no ``ffmpeg`` and no ``avconv``, and none is installable
-from its package repositories. So the tests split in two:
+Two halves, and neither is conditional on the machine any more:
 
-* The availability reporting itself is tested unconditionally. It is ordinary
-  logic and it is the part everything else depends on — a
-  :func:`codec_backend_status` that wrongly reported "available" would turn a
-  skip into a confusing failure, and one that wrongly reported "unavailable"
-  would silently disable the fallback in production.
-* The tests that would actually *run* an encoder skip, with the reason attached,
-  in the same way ``test/integration/db-schema.test.ts`` skips when no
-  PostgreSQL is reachable. They are real tests that run wherever the binary
-  exists, not placeholders.
+* The availability reporting is ordinary logic and everything else depends on
+  it — a :func:`codec_backend_status` that wrongly reported "available" would
+  turn a clean refusal into a confusing failure, and one that wrongly reported
+  "unavailable" would silently disable the fallback in production.
+* The **refusal** path is driven through that seam rather than through the
+  environment: the status function is replaced, so "what happens with no
+  backend" is tested on a machine that has one. It used to be a
+  ``skipif(BACKEND.available)``, which meant the two halves could never both
+  run and one of them was always skipped — on every machine, in either
+  direction.
 
-Nothing important rests on those skips: every format Requirements 13.2 and 13.9
-name is covered by the primary ``libsndfile`` path in ``test_formats.py``, with
-no binary involved. The fallback is a redundancy, and what is skipped here is the
-redundancy rather than the requirement.
+What still depends on the machine is the half that actually shells out to a
+codec. Task 9.3's acceptance criterion is 실패 0건·**건너뜀 0건**, so CI installs
+the ``audio`` extra and an ``ffmpeg`` binary and those tests run there. On a
+machine without one they skip with the reason attached, the same way
+``test/integration/db-schema.test.ts`` skips without a PostgreSQL.
 """
 
 from __future__ import annotations
@@ -24,9 +25,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from musicstudio_dsp import codecs
 from musicstudio_dsp.audio_buffer import AudioBuffer
 from musicstudio_dsp.codecs import (
     FFMPEG_CANDIDATES,
+    CodecBackendStatus,
     CodecBackendUnavailableError,
     codec_backend_status,
     decode_via_pydub,
@@ -72,24 +75,50 @@ class TestAvailabilityReporting:
         assert codec_backend_status().reason
 
 
+MISSING = CodecBackendStatus(available=False, reason="no backend, for this test")
+
+
+@pytest.fixture
+def without_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both entry points read the status through this one function."""
+    monkeypatch.setattr(codecs, "codec_backend_status", lambda: MISSING)
+
+
 class TestUnavailableBackend:
-    @pytest.mark.skipif(
-        BACKEND.available, reason="a codec backend is present, so refusal cannot occur"
-    )
-    def test_encode_refuses_rather_than_degrading(self) -> None:
+    def test_encode_refuses_rather_than_degrading(self, without_backend: None) -> None:
         # Requirement 13.3 promises the requested format. Falling back to some
         # other format, or to silence, would break that promise quietly.
         with pytest.raises(CodecBackendUnavailableError) as caught:
             encode_via_pydub(signal(), "mp3")
 
-        assert caught.value.reason == BACKEND.reason
+        assert caught.value.reason == MISSING.reason
 
-    @pytest.mark.skipif(
-        BACKEND.available, reason="a codec backend is present, so refusal cannot occur"
-    )
-    def test_decode_refuses_rather_than_degrading(self) -> None:
-        with pytest.raises(CodecBackendUnavailableError):
+    def test_decode_refuses_rather_than_degrading(self, without_backend: None) -> None:
+        with pytest.raises(CodecBackendUnavailableError) as caught:
             decode_via_pydub(encode(signal(), "wav"))
+
+        assert caught.value.reason == MISSING.reason
+
+    def test_the_check_is_made_per_call_rather_than_cached(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A container can lose its binary between calls, so the status is asked for every
+        # time. An import-time constant would answer with the machine's state at start-up
+        # and go on answering it after the binary was gone.
+        calls = 0
+
+        def counting() -> CodecBackendStatus:
+            nonlocal calls
+            calls += 1
+            return MISSING
+
+        monkeypatch.setattr(codecs, "codec_backend_status", counting)
+
+        for _ in range(2):
+            with pytest.raises(CodecBackendUnavailableError):
+                encode_via_pydub(signal(), "mp3")
+
+        assert calls == 2
 
 
 class TestFallbackEncoding:

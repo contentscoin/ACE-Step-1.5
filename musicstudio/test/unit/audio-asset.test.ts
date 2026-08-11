@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { watermarkId } from '../../domain/disclosure/ai-disclosure';
+
 import {
   ASSET_KINDS,
   describeUnknownAssetKind,
@@ -25,6 +27,7 @@ const provenance: AssetProvenance = {
   nonCommercialLicenseListVersion: 3,
   recordedAtMs: 1_800_000_000_000,
   aiGenerated: true,
+  watermarkId: watermarkId(1),
   qualityThresholdSetVersion: 7,
 };
 

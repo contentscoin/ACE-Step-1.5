@@ -19,6 +19,7 @@ from musicstudio_dsp.pipeline import (
     normalise_for_storage,
 )
 from musicstudio_dsp.resample import INTERNAL_SAMPLE_RATE
+from musicstudio_dsp.watermark import WATERMARK_VERSION, detect_watermark, embed_watermark
 
 
 def signal(sample_rate: int = INTERNAL_SAMPLE_RATE, frames: int = 24_000, channels: int = 2) -> AudioBuffer:
@@ -67,16 +68,59 @@ class TestNormaliseForStorage:
         assert stored.resampled is False
         assert stored.original_sample_rate == INTERNAL_SAMPLE_RATE
 
-    def test_storing_an_already_48khz_asset_is_lossless(self) -> None:
-        # No resampling means no band-limiting, so the stored copy must match the
-        # engine's output to within a 24-bit step.
+    def test_storing_an_already_48khz_asset_changes_it_only_by_the_mark(self) -> None:
+        # This test used to assert bit-losslessness to within a 24-bit step, and
+        # Requirement 16.6 made that false: the stored copy now carries the
+        # inaudible mark, so it *cannot* equal the engine's output. What is still
+        # true — and is the claim worth keeping — is that the mark is the only
+        # difference, and that it is bounded by what `watermark.py` promises.
         original = signal()
+        engine_bytes = encode(original, "wav")
+
+        stored = normalise_for_storage(engine_bytes)
+
+        restored = decode(stored.data)
+        # Marked from the *decoded* engine bytes rather than from `original`: the
+        # envelope is computed on what the pipeline actually sees, and a 24-bit
+        # step of difference in the input is a step of difference in the mark.
+        marked = embed_watermark(decode(engine_bytes))
+        for expected, actual, engine_output in zip(
+            marked.channels, restored.channels, original.channels
+        ):
+            # The mark is the whole of the difference, to within a 24-bit step.
+            assert np.max(np.abs(expected - actual)) <= LOSSLESS_TOLERANCE
+            # And the mark stays under the material it rides on.
+            difference = actual.astype(np.float64) - engine_output.astype(np.float64)
+            material = float((engine_output.astype(np.float64) ** 2).mean())
+            assert 10 * np.log10(material / float((difference**2).mean())) >= 20.0
+
+    def test_the_stored_copy_carries_the_mark_and_reports_its_version(self) -> None:
+        stored = normalise_for_storage(encode(signal(frames=96_000), "wav"))
+
+        detection = detect_watermark(decode(stored.data))
+        assert detection.detected
+        assert detection.version == stored.watermark_version == WATERMARK_VERSION
+
+    def test_the_mark_changes_no_dimension_of_the_audio(self) -> None:
+        # `shape` is measured on the marked buffer, so this is what makes that
+        # safe rather than merely convenient.
+        original = signal(frames=96_000)
 
         stored = normalise_for_storage(encode(original, "wav"))
 
-        restored = decode(stored.data)
-        for expected, actual in zip(original.channels, restored.channels):
-            assert np.max(np.abs(expected - actual)) <= LOSSLESS_TOLERANCE
+        assert stored.shape.sample_rate == original.sample_rate
+        assert stored.shape.channels == original.channel_count
+        assert stored.shape.duration_ms == pytest.approx(original.duration_ms)
+
+    def test_a_download_is_converted_from_the_marked_copy(self) -> None:
+        # The download path does not re-mark; it inherits. A second mark applied
+        # per conversion would accumulate, and the fifth download of an asset
+        # would be measurably noisier than the first.
+        stored = normalise_for_storage(encode(signal(frames=96_000), "wav"))
+
+        converted = convert_for_download(stored.data, "flac")
+
+        assert detect_watermark(converted.audio).detected
 
     def test_preserves_mono(self) -> None:
         stored = normalise_for_storage(

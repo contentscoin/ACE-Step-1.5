@@ -21,6 +21,7 @@ import type { ReactNode } from 'react';
 
 import type { DownloadFormat, DownloadRefusalCode } from '@domain/library/download';
 
+import { DisclosureBadges } from '../components/DisclosureBadges';
 import { EnterTransition } from '../components/amicro/EnterTransition';
 import { HoverLift } from '../components/amicro/HoverLift';
 import { TextReveal } from '../components/amicro/TextReveal';
@@ -30,7 +31,7 @@ import { useStudioApi } from '../lib/api/context';
 import { useSound } from '../sound/context';
 import type { DownloadOutcome, ShareState } from '../lib/api/port';
 import type { StudioAsset } from '../lib/api/types';
-import { navigate } from '../app/router';
+import { hrefFor, navigate } from '../app/router';
 import { button, chip, column, input, label, meta, panel, row } from '../styles/ui';
 
 /**
@@ -89,8 +90,8 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
             <h2 style={{ margin: 0, fontSize: 22, flex: 1 }}>
               <TextReveal text={asset.name} />
             </h2>
-            {/* Requirement 16.5 — the AI-generation label, on the detail screen. */}
-            <span style={chip}>AI 생성</span>
+            {/* Requirements 16.5, 16.13 — the same component the public page uses. */}
+            <DisclosureBadges assetKind={asset.assetKind} />
             {asset.isLoop && <span style={chip}>루프</span>}
           </div>
           <p style={meta}>{asset.caption}</p>
@@ -220,6 +221,14 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
             <p style={{ marginTop: 12 }}>
               <span style={label}>공개 링크 (Req 14.2 — 추측이 어려운 43자 토큰)</span>
               <code style={{ wordBreak: 'break-all' }}>{share.url}</code>
+              {/* The same token against this build's own visitor route, so the page an owner
+                  publishes is a page they can look at rather than a string they have to trust. */}
+              <a
+                href={hrefFor('s', share.url.split('/').at(-1) ?? '')}
+                style={{ display: 'inline-block', marginTop: 6 }}
+              >
+                공개 페이지 열기
+              </a>
             </p>
           ) : (
             <p style={{ ...meta, marginTop: 12 }}>비공개 상태입니다 (Req 14.1 — 기본값).</p>

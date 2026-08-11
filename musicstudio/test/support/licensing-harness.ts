@@ -7,6 +7,7 @@
  */
 
 import { buildLineageGraph, type LineageEdge, type LineageGraph } from '../../domain/lineage/graph';
+import { watermarkId } from '../../domain/disclosure/ai-disclosure';
 import type { AssetProvenance } from '../../domain/provenance';
 import type { AuditLogDraft } from '../../domain/audit-log/entry';
 import type {
@@ -28,6 +29,7 @@ export function provenance(overrides: Partial<AssetProvenance> = {}): AssetProve
     nonCommercialLicenseListVersion: 1,
     recordedAtMs: 1_700_000_000_000,
     aiGenerated: true,
+    watermarkId: watermarkId(1),
     ...overrides,
   };
 }
