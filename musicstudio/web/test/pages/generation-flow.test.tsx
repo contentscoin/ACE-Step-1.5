@@ -106,8 +106,15 @@ describe('생성 → 결과 확인 → 다운로드', () => {
     expect(screen.getByRole('group', { name: '파형' })).toBeTruthy();
 
     // Requirement 13.1: the formats this asset kind offers, and a permitted lossless download.
+    //
+    // This used to assert the panel said "준비됨" — which it did, for a file no implementation
+    // produced. The claim now is that bytes reached the user, so the assertion is the delivered
+    // file and its size rather than the word that preceded it.
     fireEvent.click(screen.getByRole('button', { name: 'WAV' }));
-    expect(await screen.findByText(/준비됨/)).toBeTruthy();
+    expect(await screen.findByText(/내려받음/)).toBeTruthy();
+
+    const file = await api.fetchDownload(assetId as string, 'wav');
+    expect(file.blob.size).toBeGreaterThan(0);
   });
 
   it('refuses a lossless download on a plan without it, and names the plans (Req 13.4)', async () => {

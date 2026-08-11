@@ -19,6 +19,7 @@
 import type { ReactNode } from 'react';
 
 import { MainRegion, SkipLink } from './a11y/SkipLink';
+import { DemoModeBanner } from './components/DemoModeBanner';
 import { hrefFor, useRoute } from './app/router';
 import { EnterTransition } from './components/amicro/EnterTransition';
 import { HoverLift } from './components/amicro/HoverLift';
@@ -131,6 +132,13 @@ export function App(): ReactNode {
         <main style={{ maxWidth: 980, margin: '0 auto', padding: 24, lineHeight: 1.6 }}>
           {/* First in the DOM, so it is the first Tab stop — see `a11y/SkipLink.tsx`. */}
           <SkipLink />
+          {/*
+            After the skip link and before everything else. The skip link has to stay the first
+            Tab stop (31.13), and the banner has to be read before the screen it qualifies —
+            putting it below the navigation would let a visitor reach the generation form without
+            passing the sentence that says nothing will be generated.
+          */}
+          <DemoModeBanner />
           <header style={{ marginBottom: 20 }}>
             <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>
               <TextReveal text="MusicStudio" />

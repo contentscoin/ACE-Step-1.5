@@ -29,7 +29,46 @@ import { Player } from '../components/playback/Player';
 import { StatusMessage } from '../components/StatusMessage';
 import { useStudioApi } from '../lib/api/context';
 import { useSound } from '../sound/context';
-import type { DownloadOutcome, ShareState } from '../lib/api/port';
+import type { DownloadFile, DownloadOutcome, ShareState } from '../lib/api/port';
+
+/** A file that reached the user, beside the format they asked for — the two can differ. */
+interface DeliveredDownload {
+  readonly file: DownloadFile;
+  readonly requestedFormat: DownloadFormat;
+}
+
+/** Bytes as the user reads them. Sizes here span a few KB to tens of MB. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${String(bytes)}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
+ * Hands a blob to the browser's download machinery.
+ *
+ * An anchor with `download` rather than `window.open`: the object URL has no file name of its own,
+ * and an opened tab would show the user a media player rather than saving the file they asked to
+ * save.
+ *
+ * The anchor and the URL are both torn down on a later turn rather than immediately after the
+ * click. Removing the element synchronously cost the file its name — the browser had started the
+ * download but had not yet read `download` off the node, so the file landed as `download` with no
+ * extension; revoking synchronously loses the same race with the bytes and lands an empty file.
+ */
+function saveFile(file: DownloadFile): void {
+  if (typeof URL.createObjectURL !== 'function' || typeof document === 'undefined') return;
+  const url = URL.createObjectURL(file.blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = file.fileName;
+  document.body.append(anchor);
+  anchor.click();
+  globalThis.setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, 10_000);
+}
 import type { StudioAsset } from '../lib/api/types';
 import { hrefFor, navigate } from '../app/router';
 import { button, chip, column, input, label, meta, panel, row } from '../styles/ui';
@@ -56,6 +95,7 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
   const [asset, setAsset] = useState<StudioAsset | null>(null);
   const [share, setShare] = useState<ShareState | null>(null);
   const [download, setDownload] = useState<DownloadOutcome | null>(null);
+  const [delivered, setDelivered] = useState<DeliveredDownload | null>(null);
   const [name, setName] = useState('');
 
   const load = useCallback(async () => {
@@ -144,7 +184,7 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
                   onClick={() =>
                     void api
                       .planDownload(asset.id, format, format === 'wav' || format === 'flac')
-                      .then((outcome) => {
+                      .then(async (outcome) => {
                         setDownload(outcome);
                         // The cue names the *reason*, so the sound and the message on screen are
                         // the same fact rather than a generic failure beep beside a specific one.
@@ -155,6 +195,16 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
                               ? 'download.refused.plan'
                               : 'download.refused.format',
                         );
+                        if (!outcome.ruling.allowed) {
+                          setDelivered(null);
+                          return;
+                        }
+                        // The ruling allowed it, so the file is fetched and handed to the browser
+                        // in the same gesture. This panel used to stop at the ruling and print
+                        // "준비됨" — a success message for a file no code produced.
+                        const file = await api.fetchDownload(asset.id, format);
+                        setDelivered({ file, requestedFormat: format });
+                        saveFile(file);
                       })
                   }
                 >
@@ -164,9 +214,20 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
             ))}
           </div>
 
-          {download !== null && download.ruling.allowed && (
+          {delivered !== null && (
             <p style={{ ...meta, marginTop: 12 }}>
-              준비됨: <code>{download.fileName}</code> · 약 {Math.round((download.bytes ?? 0) / 1_000_000)}MB
+              내려받음: <code>{delivered.file.fileName}</code> ·{' '}
+              {formatBytes(delivered.file.blob.size)}
+              {delivered.file.deliveredFormat !== delivered.requestedFormat && (
+                // Stated, not hidden behind the extension. The demo backend has no encoder, so a
+                // request for MP3 comes back as WAV; a gateway returns what the DSP worker
+                // encoded and this line never appears.
+                <>
+                  {' '}
+                  — 요청한 형식은 {delivered.requestedFormat.toUpperCase()}이지만{' '}
+                  {delivered.file.deliveredFormat.toUpperCase()}으로 전달되었습니다.
+                </>
+              )}
             </p>
           )}
 

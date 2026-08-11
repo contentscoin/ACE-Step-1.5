@@ -26,14 +26,20 @@ precise about what is running, because the interesting half is real:
   `activeLineAt`, `positionAt`, `applyFeedQuery`, `applyLike`,
   `validateSongRequest`, `executeCommand`. A screen that re-derived any of those
   would be a second answer to a settled question.
-- **Timing and audio are invented.** There is no engine, so a submitted job
-  advances on a timer and finishes with a seeded asset; there is no object store,
-  so the player emits a generated tone. Both are confined to `demo-api.ts`, and
-  both are what a real deployment replaces first.
-- **Nothing leaves the browser.** Every control responds, but no audio is
-  generated and no file is produced — the download panel reports a prepared file
-  that does not exist. `docs/ROADMAP.md` §1 records this in full, and §3 track A
-  is the fix.
+- **The app says it is a demo, on every screen.** A banner above the navigation
+  states that no music is generated, and the player repeats it beside the
+  transport. It reads `api.backend.kind` rather than a build flag, so it
+  disappears when a gateway is wired and cannot be left switched on by mistake.
+- **No music is generated, and the audio is synthetic.** There is no engine, so a
+  submitted job advances on a timer and finishes with a seeded asset. The sound
+  is a seeded harmonic tone rendered from the asset id
+  (`web/src/lib/api/demo-audio.ts`) — the same bytes the player streams and the
+  download delivers, so the file you save is the audio you heard. Both are what a
+  real deployment replaces first.
+- **The download is a real file.** It used to report a prepared file of
+  `duration × 48000 × channels × 2` bytes and deliver nothing. It now returns a
+  WAV whatever format was requested — the demo has no encoder — and the panel
+  says which format arrived instead of repeating which was asked for.
 - **State is per-session.** The demo backend holds published assets, renames and
   timeline history in memory. A reload returns to the seed.
 
