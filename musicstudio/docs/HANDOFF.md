@@ -1,5 +1,9 @@
 # MusicStudio 인수인계서 (Handoff)
 
+> **이 문서는 시점 기록입니다.** 아래 상태표는 태스크 4.1 시점의 것이고, 그 뒤로 4.2–9.3이
+> 전부 들어왔습니다. 현재 상태와 다음에 할 일은 [`ROADMAP.md`](./ROADMAP.md)와
+> [`../README.md`](../README.md)를 보십시오.
+
 작성 시점: 태스크 **4.1 Timeline_Service** 완료 직후.
 스펙: `.kiro/specs/ai-music-generation-service/` (requirements.md / design.md / tasks.md).
 

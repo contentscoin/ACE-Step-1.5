@@ -9,7 +9,8 @@ Spec: `.kiro/specs/ai-music-generation-service/` (`requirements.md`, `design.md`
 `tasks.md`). Spec tasks **1.0 through 9.3 are implemented** — infrastructure,
 generation, DSP, timeline, library/playback/sharing, safety/consent/licensing,
 frontend, observability, and the public API, each with the tests its task names.
-What is deliberately still open is listed under [Not wired yet](#not-wired-yet).
+What is deliberately still open is listed under [Not wired yet](#not-wired-yet), and
+`docs/ROADMAP.md` is the plan for closing it.
 
 ## Live demo
 
@@ -29,6 +30,10 @@ precise about what is running, because the interesting half is real:
   advances on a timer and finishes with a seeded asset; there is no object store,
   so the player emits a generated tone. Both are confined to `demo-api.ts`, and
   both are what a real deployment replaces first.
+- **Nothing leaves the browser.** Every control responds, but no audio is
+  generated and no file is produced — the download panel reports a prepared file
+  that does not exist. `docs/ROADMAP.md` §1 records this in full, and §3 track A
+  is the fix.
 - **State is per-session.** The demo backend holds published assets, renames and
   timeline history in memory. A reload returns to the seed.
 
