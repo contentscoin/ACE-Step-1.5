@@ -13,7 +13,7 @@
  * enough that Requirement 5.4's progress is genuinely a sequence rather than a jump.
  */
 
-import { downloadFileName, downloadFormatsFor, ruleOnDownload } from '@domain/library/download';
+import { downloadFormatsFor, ruleOnDownload } from '@domain/library/download';
 import { applyLibraryQuery, toLibraryQuery, type LibraryPage, type LibraryQueryInput } from '@domain/library/query';
 import { activeLineAt } from '@domain/playback/lyrics-sync';
 import { positionAt } from '@domain/playback/loop';
@@ -29,7 +29,8 @@ import type { EffectChain } from '@domain/effects/chain';
 import type { MasteringSuggestion } from '@domain/mastering/suggestion';
 import type { AssetKind } from '@domain/asset-kind';
 
-import type { ShareState, StudioApi, StudioVersion, SubmitOutcome } from './port';
+import { encodeWav, renderDemoTone } from './demo-audio';
+import type { DownloadFile, ShareState, StudioApi, StudioVersion, SubmitOutcome } from './port';
 import { seedAssets, seedProject, seedSuggestion } from './seed';
 import type { StudioAsset, StudioJob } from './types';
 
@@ -234,9 +235,44 @@ export function createDemoApi(options: DemoApiOptions = {}): StudioApi {
     };
   }
 
+  /**
+   * The one demo artefact, rendered on demand and cached per asset.
+   *
+   * Cached because `planDownload` and `fetchDownload` both need it and a user who reads the size
+   * then clicks would otherwise pay for two identical renders. Keyed by asset id, which is the
+   * whole of what the render depends on.
+   */
+  const files = new Map<string, DownloadFile>();
+  /** Object URLs handed to `<audio>`, one per asset, so a re-render does not mint a second. */
+  const streams = new Map<string, string>();
+
+  function demoFileFor(asset: StudioAsset): DownloadFile {
+    const cached = files.get(asset.id);
+    if (cached !== undefined) return cached;
+
+    const tone = renderDemoTone(asset.id, asset.durationMs);
+    const file: DownloadFile = {
+      blob: new Blob([encodeWav(tone)], { type: 'audio/wav' }),
+      // Not `downloadFileName(...)`: that names the file after the format the user asked for, and
+      // this is a WAV whatever they asked for. A `.mp3` holding RIFF bytes is a file that fails to
+      // open with an error naming the wrong cause.
+      //
+      // The marker is ASCII while the rest of this UI is Korean, because a browser on a system
+      // whose locale cannot represent the name discards the whole `download` attribute and saves
+      // the file as `download` — extension included. The screen says in Korean what arrived; the
+      // file name only has to survive the file system.
+      fileName: `${asset.name} (demo tone).wav`,
+      deliveredFormat: 'wav',
+    };
+    files.set(asset.id, file);
+    return file;
+  }
+
   /* -------------------------------------------------------------------- api */
 
   return {
+    backend: { kind: 'demo' },
+
     async submitSong(request) {
       return submit(request, null);
     },
@@ -293,11 +329,20 @@ export function createDemoApi(options: DemoApiOptions = {}): StudioApi {
       });
 
       if (!ruling.allowed) return { ruling };
-      return {
-        ruling,
-        fileName: downloadFileName(asset.name, asset.id, format),
-        bytes: Math.round((asset.durationMs / 1000) * 48_000 * asset.channels * 2),
-      };
+      // The size of the file `fetchDownload` will actually return. Rendering it here costs the
+      // same render twice for a user who then downloads, and that is the right trade: the
+      // alternative is printing a number no artefact backs, which is what this used to do.
+      const file = demoFileFor(asset);
+      return { ruling, fileName: file.fileName, bytes: file.blob.size };
+    },
+
+    async fetchDownload(assetId, format) {
+      const asset = assets.get(assetId);
+      if (asset === undefined) throw new Error(`no such asset: ${assetId}`);
+      // `format` is recorded, not honoured: the demo has no encoder. `deliveredFormat` is what
+      // the screen reports, so the gap is stated rather than hidden behind a renamed extension.
+      void format;
+      return demoFileFor(asset);
     },
 
     downloadFormatsFor(assetKind: AssetKind) {
@@ -323,8 +368,21 @@ export function createDemoApi(options: DemoApiOptions = {}): StudioApi {
     },
 
     streamUrl(assetId) {
-      // No object store; the player synthesises a tone from this identifier. See the README.
-      return `demo:stream/${assetId}`;
+      // This used to return `demo:stream/<id>` with a comment claiming the player synthesised a
+      // tone from it. The player never read it and never made a sound — "재생" advanced a timer
+      // over silence. It now returns a URL an `<audio>` element can actually load, which is what
+      // the port always said it was.
+      const asset = assets.get(assetId);
+      if (asset === undefined) return '';
+      const cached = streams.get(assetId);
+      if (cached !== undefined) return cached;
+      // `createObjectURL` is absent under some test DOMs. Falling back to an empty string keeps
+      // the player mounting there — it renders a transport with nothing loaded, which is exactly
+      // what an environment with no media stack can honestly offer.
+      if (typeof URL.createObjectURL !== 'function') return '';
+      const url = URL.createObjectURL(demoFileFor(asset).blob);
+      streams.set(assetId, url);
+      return url;
     },
 
     async setPublished(assetId, isPublished, remixAllowed) {
