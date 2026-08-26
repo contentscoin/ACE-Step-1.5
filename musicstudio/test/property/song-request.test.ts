@@ -7,6 +7,8 @@ import {
   SONG_BATCH_SIZE_MIN,
   SONG_BPM_MAX,
   SONG_BPM_MIN,
+  SONG_CAPTION_MAX_LENGTH,
+  SONG_CAPTION_MIN_LENGTH,
   SONG_DESCRIPTION_MAX_LENGTH,
   SONG_DURATION_SECONDS_MAX,
   SONG_DURATION_SECONDS_MIN,
@@ -61,7 +63,10 @@ const simpleArbitrary: fc.Arbitrary<SimpleModeSongRequest> = fc
 const customArbitrary: fc.Arbitrary<CustomModeSongRequest> = fc
   .record(
     {
-      caption: fc.string({ maxLength: 200 }),
+      // Drawn from the bound rather than from a round number, so this arbitrary keeps meaning
+      // "in bounds" if the engine's caption limit moves. It generated the empty string before
+      // there was a lower bound, which is what this property caught when one arrived.
+      caption: fc.string({ minLength: SONG_CAPTION_MIN_LENGTH, maxLength: SONG_CAPTION_MAX_LENGTH }),
       lyrics: fc.string({ maxLength: 500 }),
       instrumental: fc.boolean(),
       bpm: fc.integer({ min: SONG_BPM_MIN, max: SONG_BPM_MAX }),

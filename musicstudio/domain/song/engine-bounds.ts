@@ -30,9 +30,40 @@ export const SONG_TIME_SIGNATURES = [2, 3, 4, 6] as const;
 
 export type SongTimeSignature = (typeof SONG_TIME_SIGNATURES)[number];
 
-/** Requirement 3.5. Not an engine constant: the product layer sets this bound. */
+/**
+ * Requirement 3.5. Not an engine constant: the product layer sets this bound.
+ *
+ * This bounds Simple_Mode's natural-language *description*, which reaches the engine as
+ * `sample_query` — the language model's input, from which it writes the caption. It is a different
+ * field from `caption` below, and the engine documents no length for it, so 2000 stands as the
+ * product's own number.
+ */
 export const SONG_DESCRIPTION_MIN_LENGTH = 1;
 export const SONG_DESCRIPTION_MAX_LENGTH = 2_000;
+
+/**
+ * `acestep/inference.py`: "caption: A short text prompt describing the desired music (main
+ * prompt). **< 512 characters**".
+ *
+ * ### Why this is a rejection and not a truncation
+ *
+ * The engine does not refuse a longer caption. It tokenises with `truncation=True` and generates
+ * from whatever survived, so a 1200-character caption produces a track built from roughly the
+ * first half of what the user asked for, with nothing anywhere saying so. The user's evidence that
+ * their instruction was dropped is that the music does not match it.
+ *
+ * The product layer validated nothing here — Requirement 4 bounds duration, BPM, time signature,
+ * key, batch and seed, and says nothing about caption length — so every caption above the engine's
+ * limit was silently cut. Rejecting with the allowance is the only option that leaves the user able
+ * to act: they can shorten the caption themselves and keep the part they care about, which is a
+ * choice the tokenizer was making for them.
+ *
+ * Requirement 4.1 is the precedent. It insists the lyric text reach the engine **untruncated**;
+ * this is the same commitment for the field beside it, enforced at the only place that can enforce
+ * it — before the request is sent.
+ */
+export const SONG_CAPTION_MIN_LENGTH = 1;
+export const SONG_CAPTION_MAX_LENGTH = 512;
 
 /**
  * Requirement 4.8.

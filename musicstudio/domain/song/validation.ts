@@ -21,6 +21,8 @@ import {
   SONG_BATCH_SIZE_MIN,
   SONG_BPM_MAX,
   SONG_BPM_MIN,
+  SONG_CAPTION_MAX_LENGTH,
+  SONG_CAPTION_MIN_LENGTH,
   SONG_DESCRIPTION_MAX_LENGTH,
   SONG_DESCRIPTION_MIN_LENGTH,
   SONG_DURATION_SECONDS_MAX,
@@ -160,6 +162,25 @@ function validateCustom(
   request: Extract<SongGenerationRequest, { mode: 'custom' }>,
 ): readonly SongFieldViolation[] {
   const violations: SongFieldViolation[] = [];
+
+  // Not a numbered requirement — the engine's own bound, which nothing in the product enforced.
+  // Above 512 the engine tokenises with truncation and generates from the remainder, so the whole
+  // failure was invisible: the request succeeded and the music quietly answered half the caption.
+  // See `SONG_CAPTION_MAX_LENGTH`.
+  if (
+    request.caption !== undefined &&
+    (request.caption.length < SONG_CAPTION_MIN_LENGTH ||
+      request.caption.length > SONG_CAPTION_MAX_LENGTH)
+  ) {
+    violations.push(
+      lengthViolation(
+        'caption',
+        request.caption.length,
+        SONG_CAPTION_MIN_LENGTH,
+        SONG_CAPTION_MAX_LENGTH,
+      ),
+    );
+  }
 
   if (request.bpm !== undefined && !isSongBpm(request.bpm)) {
     violations.push(rangeViolation('bpm', request.bpm, SONG_BPM_MIN, SONG_BPM_MAX));
