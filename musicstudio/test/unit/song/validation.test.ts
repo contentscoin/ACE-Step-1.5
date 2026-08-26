@@ -67,6 +67,57 @@ describe('Requirement 3.5 — the description is 1 to 2000 characters', () => {
   });
 });
 
+describe("the caption is 1 to 512 characters — the engine's own bound", () => {
+  /**
+   * Not a numbered requirement. `acestep/inference.py` documents `caption` as "< 512 characters",
+   * and above that the engine tokenises with truncation rather than refusing — so before this the
+   * request succeeded and the music answered whatever survived the cut, with nothing saying so.
+   *
+   * These assert the *violation payload*, because a bare refusal leaves the user unable to act:
+   * what they need is the ceiling, so they can decide themselves which half to keep.
+   */
+  it('rejects a caption longer than 512 characters and states the allowed length', () => {
+    expect(violationFor({ mode: 'custom', caption: 'x'.repeat(513) }, 'caption')).toEqual({
+      field: 'caption',
+      received: 513,
+      allowed: { kind: 'length', minLength: 1, maxLength: 512 },
+    });
+  });
+
+  it('rejects an empty caption', () => {
+    expect(violationFor({ mode: 'custom', caption: '' }, 'caption').allowed).toEqual({
+      kind: 'length',
+      minLength: 1,
+      maxLength: 512,
+    });
+  });
+
+  it('accepts both ends of the range', () => {
+    expect(parametersOf({ mode: 'custom', caption: 'x' }).caption).toBe('x');
+    expect(parametersOf({ mode: 'custom', caption: 'x'.repeat(512) }).caption?.length).toBe(512);
+  });
+
+  it('treats an omitted caption as Requirement 4.7 rather than as a violation', () => {
+    expect(validateSongRequest({ mode: 'custom', bpm: 120 }).kind).toBe('valid');
+  });
+
+  it('does not bound the Simple_Mode description by it', () => {
+    // The description reaches the engine as `sample_query` — the language model's input, from
+    // which it writes the caption. Requirement 3.5 fixes its own range at 1–2000, and confusing
+    // the two fields would cap the one that has no engine limit while leaving the one that does.
+    expect(validateSongRequest({ mode: 'simple', description: 'x'.repeat(600) }).kind).toBe('valid');
+  });
+
+  it('reports a long caption alongside the other violated fields, not instead of them', () => {
+    // Requirement 4.6 returns every violation at once. A caption check placed first that returned
+    // early would hide the BPM the user also has to fix.
+    const fields = violationsOf({ mode: 'custom', caption: 'x'.repeat(513), bpm: 500 })
+      .map((violation) => violation.field)
+      .sort();
+    expect(fields).toEqual(['bpm', 'caption']);
+  });
+});
+
 describe('Requirement 3.8 — an unsupported language is refused with the supported list', () => {
   it('returns every accepted code so the caller can choose again', () => {
     const violation = violationFor({ mode: 'simple', description: 'a ballad', vocalLanguage: 'kr' }, 'vocalLanguage');
