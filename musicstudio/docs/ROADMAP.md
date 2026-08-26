@@ -89,8 +89,20 @@
 
 ### B. 백엔드를 띄운다 (가장 큼)
 
-- **B1. `pg` 리포지토리 구현.** 마이그레이션 18개에 대응하는 저장소를 붙입니다. `account`부터
-  — 게이트웨이가 유일하게 조립하는 서비스이고, 인증 없이는 나머지가 닿지 않습니다.
+- **B1. `pg` 리포지토리 구현.** 마이그레이션에 대응하는 저장소를 붙입니다.
+  - **`account` — 완료.** `services/account/adapters/pg-account-repository.ts`. 이 트리에서 스키마를
+    실제로 읽는 첫 어댑터입니다.
+    - 붙이는 순간 **포트와 테이블이 다른 모양을 말하고 있었다는 것**이 드러났습니다: `0002`의
+      `password_hash`가 `NOT NULL`이라 소셜 전용 계정(Req 1.7, `passwordHash: null`)을 담을 수
+      없었고, `email_verified_at` 컬럼이 없었으며, 소셜 신원을 둘 곳이 아예 없었습니다.
+      `0019_account_identity.sql`이 그 셋을 채웁니다.
+    - **계약 테스트 하나를 두 구현에 돌립니다**(`test/integration/account-repository-contract.test.ts`).
+      나머지 스위트 전체가 인메모리 더블에 대고 검증하므로, 더블과 테이블이 어긋나면 테스트는 전부
+      통과하고 어긋남은 배포에서 드러납니다. 둘을 한 스위트에서 만나게 하는 것이 그것을 막는
+      유일한 방법입니다.
+    - `test:db`가 두 DB 파일을 **파일 병렬 없이** 돕니다. 같은 데이터베이스를 공유하므로 병렬로
+      돌면 서로의 행을 지웁니다.
+  - 남은 것: `audio_asset` · `generation_version` · `lineage` · `credit_ledger_entry` · 나머지.
 - **B2. 오브젝트 스토어 어댑터.** S3 호환(MinIO로 로컬). 포트에 대한 첫 구현이며, `dsp` 워커의
   base64 전송 스톱갭을 걷어내는 전제입니다.
 - **B3. 합성 루트와 `npm start`.** `server.ts`가 전 서비스를 조립하도록 확장. 지금은 auth만.
