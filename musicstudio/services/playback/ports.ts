@@ -69,6 +69,33 @@ export interface AudioObjectPort {
 }
 
 /**
+ * Writing to the object store (roadmap §4.4, step S1).
+ *
+ * ### A second interface, not two more methods on `AudioObjectPort`
+ *
+ * `Playback_Service` reads. It has no reason to be able to write, and a port that carried both
+ * would hand every reader a capability it does not use — which is how a bug in a read path ends
+ * up deleting an object. The generation path's publication step is the writer, and it receives
+ * this interface; a store implements both and the composition root passes each caller the one
+ * it needs.
+ *
+ * ### Why this did not exist until now
+ *
+ * Nothing in the tree could put bytes into the store. The in-memory double had a `put` that
+ * existed only to seed playback tests, and the generation path — engine bytes in, stored asset
+ * out — had no seam to hand the bytes to. That is the missing piece §4.3 (2) names.
+ */
+export interface AudioObjectWritePort {
+  /** Stores the whole object. A second `put` under the same key replaces it, type and all. */
+  put(objectKey: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  /**
+   * Requirement 11.8's half of a purge: the bytes, gone. Idempotent — removing an absent
+   * object is not an error, because the sweep that calls this may run twice.
+   */
+  remove(objectKey: string): Promise<void>;
+}
+
+/**
  * Requirement 12.7's waveform.
  *
  * Cached by asset and bucket count, because the reduction reads the whole object and a
