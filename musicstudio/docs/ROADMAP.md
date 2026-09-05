@@ -102,7 +102,17 @@
       유일한 방법입니다.
     - `test:db`가 두 DB 파일을 **파일 병렬 없이** 돕니다. 같은 데이터베이스를 공유하므로 병렬로
       돌면 서로의 행을 지웁니다.
-  - 남은 것: `audio_asset` · `generation_version` · `lineage` · `credit_ledger_entry` · 나머지.
+  - **`audio_asset` (LibraryAssetStore) — 완료.** `services/library/adapters/pg-asset-store.ts`.
+    - 또 하나의 구멍: **`object_key` 컬럼이 없었습니다.** 테이블은 저장된 자산의 모든 것을
+      기술하면서 그것을 저장된 것으로 만드는 하나 — 바이트의 주소 — 만 빠뜨리고 있었습니다.
+      `0020_audio_asset_object_key.sql`이 채웁니다(11.8이 오디오를 지우고 행은 남기므로 nullable).
+    - `stemSourceAssetId`는 컬럼이 아니라 **`lineage`에서 읽습니다**(`derivation_type='stem_split'`).
+      파생은 lineage가 사는 곳이고, 컬럼을 두면 같은 질문에 두 답이 생깁니다.
+    - **계약 테스트가 실제 버그를 잡았습니다.** 키셋 커서를 행 비교 `(값, id) < ($1, $2)`로 쓰면
+      **id까지 내림차순**으로 취급합니다. 도메인은 값 내림차순 + id 오름차순이라, 재생 횟수가 같은
+      자산 둘을 넘길 때 두 번째가 아니라 첫 번째가 다시 나왔습니다.
+  - 남은 것: `generation_version` · `lineage` · `credit_ledger_entry` · `voice_*` · `timeline_*` ·
+    `sound_pack` · `public_api` · `playlist`.
 - **B2. 오브젝트 스토어 어댑터.** S3 호환(MinIO로 로컬). 포트에 대한 첫 구현이며, `dsp` 워커의
   base64 전송 스톱갭을 걷어내는 전제입니다.
 - **B3. 합성 루트와 `npm start`.** `server.ts`가 전 서비스를 조립하도록 확장. 지금은 auth만.
