@@ -226,6 +226,18 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # Slice S4 (docs/ROADMAP.md §4.4): the credit store's Lua scripts are asserted
+      # against a real server here, not only against the in-process double. Same
+      # health gate reasoning as postgres above.
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -240,7 +252,10 @@ jobs:
 
       # A throwaway database, because the suite creates the whole product schema in the
       # `public` namespace — see the header of `test/integration/db-schema.test.ts`.
+      # The Redis URL gates the credit-store contract the same way; without it that
+      # file skips, which is what happens on a developer machine with no server.
       - name: Migration acceptance
         run: npm run test:db
         env:
           MUSICSTUDIO_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/musicstudio_test
+          MUSICSTUDIO_REDIS_URL: redis://localhost:6379

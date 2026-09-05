@@ -189,10 +189,10 @@ timeline·sound_pack·playlist 어댑터는 슬라이스 **뒤**입니다(§4.5)
 | 엔진 출력 샘플레이트 | 48 kHz 기본 | `acestep/inference.py:975` — 그래도 16.6 워터마크 때문에 DSP를 거쳐야 함 |
 | 큐 어댑터 | **있음** — 핸들 주입식 | `bullmq-queue.ts`. **그런데 `bullmq`가 의존성에 없음** |
 | Job 스토어 | 인메모리만 | `job-store.ts`. 설계 §2.4는 custody를 BullMQ에 둠 → 별도 pg 테이블 불필요 |
-| **자산 발행 (`AssetPublicationPort`)** | **구현 없음** | 유일한 구현이 `createRecordingAssetPublication`(테스트 더블) |
+| **자산 발행 (`AssetPublicationPort`)** | **있음** (S3) | `generation/adapters/pg-asset-publication.ts`. 그전엔 유일한 구현이 `createRecordingAssetPublication`(테스트 더블) |
 | **오브젝트 스토어 쓰기** | **포트 자체가 없음** | `AudioObjectPort`는 `head`/`read`뿐. 어디에도 `put`이 없음 |
-| **TS → DSP 호출** | **없음** | Celery 태스크 10개는 있음(`worker.py`), TS 쪽 호출자 0건 |
-| audio_asset INSERT | 없음 | `pg-asset-store.ts`는 읽기·갱신만 |
+| **TS → DSP 호출** | **없음** → S2가 HTTP 쪽을 채움 | Celery 태스크 11개는 있음(`worker.py`), TS 쪽 호출자 0건 — TS 클라이언트는 S3에서 |
+| audio_asset INSERT | **있음** (S3) | 발행 포트가 쓴다. `pg-asset-store.ts`는 여전히 읽기·갱신만 — 쓰는 쪽과 읽는 쪽이 다른 포트인 것은 의도 |
 | 합성 루트 | 없음 — 단, 템플릿은 있음 | `test/support/gateway-harness.ts`가 `buildGatewayApp`을 전 계층으로 조립 |
 | `npm start` | 없음 | |
 | SPA → 게이트웨이 | 없음 | `web/src`에 `fetch` 0건 |
@@ -213,7 +213,7 @@ provenance 필수, `object_key`) → 식별자 반환. 이 한 함수가 제품�
 
 **(3) TS ↔ DSP 브리지.** 선택지 셋:
 - (a) Node에서 Celery 프로토콜을 직접 말하기 — 메시지 포맷·결과 백엔드까지 재현해야 하고 깨지기 쉬움.
-- (b) **`dsp/`에 얇은 HTTP 사이드카** — 표준 라이브러리 `http.server`(또는 FastAPI)로 같은 10개
+- (b) **`dsp/`에 얇은 HTTP 사이드카** — 표준 라이브러리 `http.server`(또는 FastAPI)로 같은 11개
   파이프라인 함수를 그대로 노출. `pipeline.py`는 손대지 않고, `worker.py`가 Celery 셸인 것과
   똑같이 HTTP 셸 하나가 더 생김. `claude-music`의 `server.py`가 같은 형태입니다. **권고.**
 - (c) 요청마다 서브프로세스 — 임포트 콜드 스타트를 매번 냄.
@@ -226,9 +226,9 @@ provenance 필수, `object_key`) → 식별자 반환. 이 한 함수가 제품�
 | 단계 | 내용 | 확인 |
 | --- | --- | --- |
 | **S1 — 완료** | `AudioObjectWritePort`(`put`·`remove`, 읽기 포트와 **분리** — 재생 서비스가 쓰기 권한을 들 이유가 없음) + `adapters/filesystem-object-store.ts`(head/read/put/remove, 원자적 쓰기, 사이드카에 content type, 루트 탈출 키 거부) | 계약 테스트 23건이 인메모리 더블과 파일시스템 양쪽에서 동일 통과. `end` 포함 경계, 오프셋을 식별하는 바이트, 범위 밖 거부, `../` 거부 |
-| **S2** | DSP HTTP 사이드카 — `normalise_for_storage`부터, 나머지 9개는 같은 틀 | curl로 WAV 보내 48 kHz + 워터마크 버전 응답 |
-| **S3** | `AssetPublicationPort` pg 구현 (S1+S2 사용) + 계약 테스트(더블 vs 실물) | INSERT된 행의 `object_key`가 실제 파일을 가리키고 provenance CHECK 통과 |
-| **S4** | Redis `eval` 심 + 크레딧 스토어 배선 — v0는 `freeChargePort`로 건너뛰어도 됨 | 잔액 차감/환급이 Lua 스크립트로 실제 Redis에서 동작 |
+| **S2 — 완료** | `dsp/src/musicstudio_dsp/sidecar.py` — 표준 라이브러리 `http.server`, 의존성 추가 0. 태스크별 코드 없이 **`POST /tasks/<이름>` → `celery_app.tasks[이름].run(**body)`** 하나로 11개 전부 디스패치. Celery 태스크 객체 **자체를 호출**하므로 두 셸이 표류할 수 없고, Celery에 등록하면 HTTP에도 저절로 노출. `GET /health`가 태스크 목록 반환(S5 컴포즈 헬스체크용). `python -m musicstudio_dsp.sidecar`, 기본 `127.0.0.1:8002` | 실제 소켓 왕복 13건: 같은 입력에 대해 HTTP 응답 == Celery `.run` 결과(**dict 동일성**), 22.05 kHz 입력 → 48 kHz + `watermark_version` + 선언된 `STORAGE_FORMAT`(FLAC) 헤더, Celery 내장 태스크 404, 인자 누락 400, 태스크 예외 500(예외명 포함), 비객체 본문 400, 256 MiB 초과 413(본문 읽기 전 거부) |
+| **S3 — 완료** | `services/generation/adapters/pg-asset-publication.ts` — 결과마다 **정규화(S2) → 도메인 검증 → `put`(S1) → INSERT**. 바이트가 행보다 먼저: 행이 곧 "제품에 존재함"이고, 바이트가 아직 오는 중인 자산은 S1의 원자적 쓰기가 한 층 아래서 막는 그 상태라 한 층 위에서도 막음. INSERT 실패 시 방금 넣은 객체를 `remove` — 행 없는 객체는 11.8 스윕이 모르는 고아. provenance는 세 출처(엔진 라이선스 → `EngineLicensePort`, 33.14 쌍 → `provenanceFieldsFor(사이드카가 보고한 버전)`, 원본 샘플레이트 → DSP 보고)에서 조립해 `validateProvenance`로 전체 검증. 성공 결과만 발행(5.6). lineage는 **쓰지 않음** — `withEditLineage`가 감싼다. `adapters/dsp-http-client.ts`가 S2의 TS 쪽 절반(`createAceHttpTransport`와 같은 관례, 응답 필드 전부 타입 검사 — 33.7의 "한 번 쓰고 수정 없음"이므로 쓰기 전에 맞아야 함) | pg + **실제 파일시스템 스토어** + 스크립트된 DSP로 8건: 행의 `object_key`가 실제 객체(길이 일치)를 가리킴, provenance가 도메인·DB CHECK 모두 통과하고 `watermarkId`가 **보고된 버전**(3)을 기록, 잡 캡션에서 이름 파생·폴백, 실패 결과 건너뜀, 3채널이면 도메인 어휘(`channels_range`)로 거부하며 아무것도 쓰지 않음, INSERT 실패 시 객체 제거. 별도로 **실제 Python 사이드카 왕복 2건**(`MUSICSTUDIO_DSP_URL` 게이트): 22.05 kHz → 48 kHz + 워터마크 버전 + FLAC 헤더, 오류 봉투 → `DspTaskFailed`. **미완**: 사이드카 왕복은 S5 컴포즈 전까지 CI 밖(로컬 검증만) · 레지스트리 → `EngineLicensePort` 어댑터는 S5 · `isLoop`는 아직 항상 `false`(BGM 루프는 슬라이스 밖) |
+| **S4 — 완료** | `redis-client.ts`의 `RedisConnection`이 `CreditRedisCommands`(`eval`·`incrby`)까지 포함 — 그 전에는 크레딧 스토어의 Lua 스크립트를 서버로 나를 수 있는 것이 트리에 **없었음**. 연결 하나가 계정 스토어와 크레딧 스토어 둘 다를 만족하므로 합성 루트는 클라이언트 하나만 연다. `freeRefundPort`를 `freeChargePort` 옆에 추가 — v0 슬라이스는 이 **쌍**으로 크레딧 없이 돌고, 실제 `CreditService`는 둘을 한꺼번에 대체. CI `database` 잡에 Redis 서비스 추가, `MUSICSTUDIO_REDIS_URL`로 게이트 | 계약 테스트 8건을 인프로세스 더블과 **실제 Redis 7** 양쪽에서 동일 통과: 최초 잔액 1회, 차감·0 착지·초과 거부, 미지 계정 = 0, 적립, 잡 슬롯 상한·해제·0 미만 없음, 계정 분리. 더블이 만들 수 없는 두 건 — 잔액 25에 동시 차감 40건 → **정확히 25건** 적용·15건 거부·잔액 0, 슬롯 상한 3에 동시 요청 12건 → 정확히 3건 — 가 "음수 불가"(2.3)를 페이크의 성질이 아닌 배포의 성질로 만든다. **미완**: `CreditService` 전체 배선은 `credit_ledger_entry`·`account_plan` pg 어댑터(§4.5 B1)가 있어야 하므로 슬라이스 밖 · Redis 서버 다운 시 `createRedisConnection`이 조용히 재시도하는 문제는 S5 헬스체크에서 다룸 |
 | **S5** | 합성 루트 `api/gateway/main.ts` + `npm start` — `gateway-harness.ts`를 실물 어댑터로 치환. `bullmq` 의존성 추가, Worker 프로세스, 엔진 `baseUrl` | 프로세스가 뜨고 `/health` 응답 |
 | **S6** | **엔드투엔드**: `docker compose up`(PostgreSQL·Redis·DSP 사이드카·게이트웨이·워커) + 로컬 ACE-Step | curl: 가입 → 로그인 → 생성 → 폴링 완료 → 다운로드가 `RIFF`/`WAVE` 헤더의 실제 오디오 |
 | **S7** | C1 — `StudioApi` HTTP 구현, `main.tsx` 스위치. 데모 배너가 **저절로** 사라짐 | 브라우저에서 생성 → 실제 곡 재생 |

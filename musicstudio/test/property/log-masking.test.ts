@@ -50,19 +50,37 @@ const arbInput = fc.record({
   timestampMs: fc.integer({ min: 1, max: 2 ** 42 }),
 });
 
+/**
+ * The serialised line for `input` with **no** secret on it.
+ *
+ * The properties below assert that a secret is absent from the whole line, and "absent" is only
+ * a claim about masking when the secret was not already there for another reason. A generated
+ * local part can be a substring of its own domain (`e--@e--0.aa` — the masked value keeps the
+ * domain, so the line legitimately contains `e--`), or of a request id. Those cases say nothing
+ * about the masker, so they are excluded with `fc.pre` against this baseline rather than by
+ * weakening the assertion: the line is still checked whole, exactly as the header argues.
+ */
+function lineWithoutSecrets(input: Parameters<typeof buildJobLog>[0]): string {
+  const bare = buildJobLog(input);
+  return JSON.stringify(bare) + JSON.stringify(toWireFields(bare));
+}
+
 describe('Requirement 18.8 — a job log never carries raw PII', () => {
   it('keeps the raw local part out of the serialised record', () => {
     fc.assert(
       fc.property(arbInput, arbEmail, (input, email) => {
+        const localPart = email.slice(0, email.indexOf('@'));
+        const domain = email.slice(email.indexOf('@') + 1);
+        fc.pre(!domain.includes(localPart) && !lineWithoutSecrets(input).includes(localPart));
+
         const record = buildJobLog({ ...input, actorEmail: email });
         const serialised = JSON.stringify(record) + JSON.stringify(toWireFields(record));
 
-        const localPart = email.slice(0, email.indexOf('@'));
         // The whole line, not just the field — see the module header.
         expect(serialised).not.toContain(localPart);
         expect(serialised).not.toContain(email);
         // The domain survives, which is what makes the masked value useful for triage.
-        expect(record.actorEmailMasked).toBe(`${FULLY_MASKED}@${email.slice(email.indexOf('@') + 1)}`);
+        expect(record.actorEmailMasked).toBe(`${FULLY_MASKED}@${domain}`);
         return true;
       }),
       { numRuns: 300 },
@@ -72,12 +90,15 @@ describe('Requirement 18.8 — a job log never carries raw PII', () => {
   it('keeps all but the last four characters of a key out', () => {
     fc.assert(
       fc.property(arbInput, arbApiKey, (input, apiKey) => {
+        const secretPrefix = apiKey.slice(0, apiKey.length - 4);
+        fc.pre(!lineWithoutSecrets(input).includes(secretPrefix));
+
         const record = buildJobLog({ ...input, apiKey });
         const serialised = JSON.stringify(record) + JSON.stringify(toWireFields(record));
 
         expect(serialised).not.toContain(apiKey);
         // The prefix that identifies the key's environment is secret too.
-        expect(serialised).not.toContain(apiKey.slice(0, apiKey.length - 4));
+        expect(serialised).not.toContain(secretPrefix);
         expect(record.apiKeyMasked).toBe(`${MASKED_API_KEY_PREFIX}${apiKey.slice(-4)}`);
         return true;
       }),
