@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createDspHttpClient, DspTaskFailed } from '../../services/generation/adapters/dsp-http-client';
+import { wavBytes } from '../support/wav-fixture';
 
 /**
  * The TypeScript client against the real Python sidecar (S2 ↔ S3).
@@ -16,37 +17,6 @@ import { createDspHttpClient, DspTaskFailed } from '../../services/generation/ad
 
 const sidecarUrl = process.env['MUSICSTUDIO_DSP_URL'];
 const describeSidecar = sidecarUrl === undefined ? describe.skip : describe;
-
-/** A one-second 440 Hz stereo WAV at 22.05 kHz — below 48 kHz, so the resample has to happen. */
-function wavBytes(sampleRate = 22_050, frames = 22_050): Uint8Array {
-  const channels = 2;
-  const bytesPerSample = 2;
-  const dataBytes = frames * channels * bytesPerSample;
-  const buffer = new ArrayBuffer(44 + dataBytes);
-  const view = new DataView(buffer);
-  const ascii = (offset: number, text: string): void => {
-    for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
-  };
-  ascii(0, 'RIFF');
-  view.setUint32(4, 36 + dataBytes, true);
-  ascii(8, 'WAVE');
-  ascii(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * channels * bytesPerSample, true);
-  view.setUint16(32, channels * bytesPerSample, true);
-  view.setUint16(34, 16, true);
-  ascii(36, 'data');
-  view.setUint32(40, dataBytes, true);
-  for (let i = 0; i < frames; i += 1) {
-    const sample = Math.round(0.5 * Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 0x7fff);
-    view.setInt16(44 + i * 4, sample, true);
-    view.setInt16(46 + i * 4, Math.round(sample * 0.75), true);
-  }
-  return new Uint8Array(buffer);
-}
 
 describeSidecar('DSP HTTP client against the running sidecar', () => {
   // Built inside each test, not at the top of the block: vitest runs a skipped `describe`'s
