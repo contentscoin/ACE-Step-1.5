@@ -90,6 +90,8 @@
 ### B. 백엔드를 띄운다 (가장 큼)
 
 - **B1. `pg` 리포지토리 구현.** 마이그레이션에 대응하는 저장소를 붙입니다.
+  **순서는 §4가 정합니다** — 아래 두 개가 끝난 뒤, 나머지 저장소는 수직 슬라이스(§4.4)가
+  먼저이고 그 뒤에 §4.5의 순서로 이어갑니다. 저장소를 수평으로 다 붙여도 곡은 나오지 않습니다.
   - **`account` — 완료.** `services/account/adapters/pg-account-repository.ts`. 이 트리에서 스키마를
     실제로 읽는 첫 어댑터입니다.
     - 붙이는 순간 **포트와 테이블이 다른 모양을 말하고 있었다는 것**이 드러났습니다: `0002`의
@@ -153,13 +155,99 @@
 
 ---
 
-## 4. 최단 경로
+## 4. 최단 경로 — 수직 슬라이스 (기획 보강, 2026-08-26)
 
-"진짜 곡이 나오는" 상태까지의 최소 집합은 **B1 → B2 → B3 → B5 → C1**입니다. B4는 그 다섯을
-반복 가능하게 만들고, C2·C3는 브라우저에서 끝까지 가려면 필요합니다.
+B1을 두 저장소(account, audio_asset)까지 진행한 시점에서 다시 세웠습니다. 두 어댑터는 각각
+스키마 구멍을 드러냈고 그 자체로 값어치가 있었지만, **"실제로 쓸 수 있고 기능이 동작하는"**
+상태로 가는 순서는 아니었습니다. 저장소를 수평으로 전부 붙여도 곡은 나오지 않습니다 — 곡이
+나오려면 **쓰기 경로 하나**가 끝까지 이어져야 하고, 그 경로 위에는 아직 존재하지 않는 조각이
+셋 있습니다.
 
-A는 완료되었습니다. 데모는 이제 자신이 무엇인지 말하고, 재생과 다운로드는 실제 바이트를
-다룹니다 — 다만 **음악은 여전히 생성되지 않습니다.** 그것은 B의 일입니다.
+### 4.1 첫 곡 하나가 실제로 밟는 경로
+
+```
+가입 → 로그인 → POST /songs → Job_Orchestrator → 큐 → ACE_Engine(HTTP) → 오디오 bytes
+  → normalise_for_storage(48kHz + 워터마크, DSP) → 오브젝트 스토어 PUT
+  → audio_asset INSERT(+provenance) → 라이브러리 조회 → 재생(Range) / 다운로드
+```
+
+lineage는 이 경로 위에 **없습니다.** `audio_asset_require_lineage`(0006)는 `stem`·`mix`에만
+걸리고, 새로 생성한 `song`은 lineage 행이 필요 없습니다. lineage·generation_version·voice·
+timeline·sound_pack·playlist 어댑터는 슬라이스 **뒤**입니다(§4.5).
+
+### 4.2 경로 위 조각의 현재 상태 — 전부 저장소에서 확인한 것
+
+| 조각 | 상태 | 근거 |
+| --- | --- | --- |
+| account 영속 | **있음** | `pg-account-repository.ts` (PR #9) |
+| 세션·로그인 제한 (Redis) | **있음** | `redis-session-store.ts`, `redis-login-attempt-store.ts` |
+| Redis 클라이언트 | 부분 — `get/set/del`만 | `redis-client.ts`. 크레딧 스토어가 쓰는 `eval`이 없음 |
+| 크레딧 잔액 (Redis, Lua) | **있음** — 배선만 없음 | `credit/adapters/redis-balance-store.ts` + `atomic-scripts.ts` |
+| 크레딧 없이 돌리는 스위치 | **있음** | `freeChargePort` (`generation/ports.ts`) — v0 슬라이스용 |
+| 엔진 HTTP 전송 | **있음** | `createAceHttpTransport({ baseUrl })` (`adapters/ace/transport.ts:81`) |
+| 엔진 어댑터 | **있음** — 결과 bytes를 직접 내려받음 | `AceEngineAdapter`, `NormalizedGenerationResult.audioBuffer: Buffer` |
+| 엔진 출력 샘플레이트 | 48 kHz 기본 | `acestep/inference.py:975` — 그래도 16.6 워터마크 때문에 DSP를 거쳐야 함 |
+| 큐 어댑터 | **있음** — 핸들 주입식 | `bullmq-queue.ts`. **그런데 `bullmq`가 의존성에 없음** |
+| Job 스토어 | 인메모리만 | `job-store.ts`. 설계 §2.4는 custody를 BullMQ에 둠 → 별도 pg 테이블 불필요 |
+| **자산 발행 (`AssetPublicationPort`)** | **구현 없음** | 유일한 구현이 `createRecordingAssetPublication`(테스트 더블) |
+| **오브젝트 스토어 쓰기** | **포트 자체가 없음** | `AudioObjectPort`는 `head`/`read`뿐. 어디에도 `put`이 없음 |
+| **TS → DSP 호출** | **없음** | Celery 태스크 10개는 있음(`worker.py`), TS 쪽 호출자 0건 |
+| audio_asset INSERT | 없음 | `pg-asset-store.ts`는 읽기·갱신만 |
+| 합성 루트 | 없음 — 단, 템플릿은 있음 | `test/support/gateway-harness.ts`가 `buildGatewayApp`을 전 계층으로 조립 |
+| `npm start` | 없음 | |
+| SPA → 게이트웨이 | 없음 | `web/src`에 `fetch` 0건 |
+
+### 4.3 새로 드러난 설계 공백 셋
+
+수평 B1로는 절대 드러나지 않았을 것들입니다. 셋 다 "어댑터 하나 더"가 아니라 **없는 이음매**입니다.
+
+**(1) `AssetPublicationPort`의 실제 구현.** 엔진 bytes를 받아 → DSP `normalise_for_storage`
+(19.4 48 kHz, 16.6 워터마크, 버전 보고) → 오브젝트 스토어 PUT → `audio_asset` INSERT(33.7/33.14
+provenance 필수, `object_key`) → 식별자 반환. 이 한 함수가 제품의 **저장 행위**이고, 워터마크가
+"저장되면"에 붙는다는 16.6의 진술이 코드로 존재하는 유일한 장소가 됩니다.
+
+**(2) 오브젝트 스토어 쓰기 포트.** `AudioObjectPort`에 `put(objectKey, bytes, contentType)`을
+추가하고 첫 구현은 **로컬 파일시스템**으로 둡니다. 정직하고 작고, 같은 구현이 `head`/`read`도
+채우므로 C3(Range 스트리밍)이 공짜로 따라옵니다. S3/MinIO는 배포(E)에서 교체 — 포트가 있으면
+교체 지점은 한 곳입니다.
+
+**(3) TS ↔ DSP 브리지.** 선택지 셋:
+- (a) Node에서 Celery 프로토콜을 직접 말하기 — 메시지 포맷·결과 백엔드까지 재현해야 하고 깨지기 쉬움.
+- (b) **`dsp/`에 얇은 HTTP 사이드카** — 표준 라이브러리 `http.server`(또는 FastAPI)로 같은 10개
+  파이프라인 함수를 그대로 노출. `pipeline.py`는 손대지 않고, `worker.py`가 Celery 셸인 것과
+  똑같이 HTTP 셸 하나가 더 생김. `claude-music`의 `server.py`가 같은 형태입니다. **권고.**
+- (c) 요청마다 서브프로세스 — 임포트 콜드 스타트를 매번 냄.
+
+(b)로 가면 `worker.py` 주석이 스톱갭이라 적어 둔 base64 전송을 **객체 키 전달**로 바꿀 자리도
+같이 생깁니다 — 사이드카가 오브젝트 스토어를 직접 읽으면 되므로.
+
+### 4.4 슬라이스 순서 — 각 단계에 "돌려서 확인하는 방법"이 있습니다
+
+| 단계 | 내용 | 확인 |
+| --- | --- | --- |
+| **S1** | `AudioObjectPort.put` + 파일시스템 구현(head/read 포함) | 계약 테스트: put → head 크기 일치 → read Range 바이트 일치 |
+| **S2** | DSP HTTP 사이드카 — `normalise_for_storage`부터, 나머지 9개는 같은 틀 | curl로 WAV 보내 48 kHz + 워터마크 버전 응답 |
+| **S3** | `AssetPublicationPort` pg 구현 (S1+S2 사용) + 계약 테스트(더블 vs 실물) | INSERT된 행의 `object_key`가 실제 파일을 가리키고 provenance CHECK 통과 |
+| **S4** | Redis `eval` 심 + 크레딧 스토어 배선 — v0는 `freeChargePort`로 건너뛰어도 됨 | 잔액 차감/환급이 Lua 스크립트로 실제 Redis에서 동작 |
+| **S5** | 합성 루트 `api/gateway/main.ts` + `npm start` — `gateway-harness.ts`를 실물 어댑터로 치환. `bullmq` 의존성 추가, Worker 프로세스, 엔진 `baseUrl` | 프로세스가 뜨고 `/health` 응답 |
+| **S6** | **엔드투엔드**: `docker compose up`(PostgreSQL·Redis·DSP 사이드카·게이트웨이·워커) + 로컬 ACE-Step | curl: 가입 → 로그인 → 생성 → 폴링 완료 → 다운로드가 `RIFF`/`WAVE` 헤더의 실제 오디오 |
+| **S7** | C1 — `StudioApi` HTTP 구현, `main.tsx` 스위치. 데모 배너가 **저절로** 사라짐 | 브라우저에서 생성 → 실제 곡 재생 |
+
+S6이 끝나는 순간이 "음악이 생성된다"가 참이 되는 순간입니다. 그 전까지의 모든 것은 준비입니다.
+
+### 4.5 슬라이스 밖 — 순서대로
+
+1. 남은 B1 저장소: `lineage`(편집·스템·믹스다운이 필요로 함) → `generation_version` →
+   `credit_ledger_entry` → `voice_*` → `timeline_*` → `sound_pack` → `public_api` → `playlist`.
+   각각 계정·자산 때처럼 **계약 테스트를 두 구현에** 돌리는 방식 그대로.
+2. C2 로그인 화면, B6 VRAM 프리플라이트·동시성 1, B7 진행률 폴백, D1 웹훅 트리거.
+3. E — Vercel git 연동, 백엔드 컨테이너 호스팅, S3 교체.
+
+### 4.6 왜 순서를 바꾸는가 — 한 문단
+
+수평 B1은 "포트와 테이블이 어긋난 곳"을 찾는 데는 최선의 방법이었고 실제로 넷을 찾았습니다.
+하지만 저장소 열 개를 다 붙여도 **오브젝트 스토어에 쓰는 포트가 없다는 사실**은 드러나지
+않았을 겁니다 — 그것은 저장소가 아니라 경로를 따라가야 보입니다. 이제부터는 경로를 따라갑니다.
 
 ---
 
@@ -167,7 +255,11 @@ A는 완료되었습니다. 데모는 이제 자신이 무엇인지 말하고, �
 
 - **데모를 유지할 것인가.** 실제 백엔드가 붙으면 `demo-api`는 두 번째 진실이 됩니다. 스크린샷용
   픽스처로 남길지, 지울지 정해야 합니다.
-- **오브젝트 스토어 선택.** S3 / R2 / MinIO 자체 호스팅.
+- **오브젝트 스토어 선택.** v0는 로컬 파일시스템으로 결정(§4.3 (2)) — 포트가 생기면 교체 지점이
+  한 곳입니다. 배포 시 S3 / R2 / MinIO 중 선택은 아직 열려 있습니다.
+- **DSP 브리지.** §4.3 (3)에서 HTTP 사이드카를 권고했습니다. Celery 워커를 유지할지, 사이드카로
+  대체할지는 S2에서 실제로 붙여 본 뒤 결정합니다 — 둘 다 `pipeline.py` 위의 셸이라 파이프라인
+  코드는 어느 쪽이든 그대로입니다.
 - **엔진 호스팅.** GPU가 필요하므로 게이트웨이와 같은 곳에 둘 수 없습니다.
 
 ## 6. 선행 사례에서 가져온 것 — `AgriciDaniel/claude-music`
