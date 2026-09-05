@@ -19,6 +19,7 @@
  */
 
 import type { NormalizedGenerationResult } from '../../adapters/normalized-generation';
+import type { CreditRefundPort } from '../../adapters/registry/ports';
 import type { AssetKind } from '../../domain/asset-kind';
 import type { DerivationType } from '../../domain/derivation-type';
 
@@ -50,6 +51,19 @@ export interface CreditChargePort {
  */
 export const freeChargePort: CreditChargePort = {
   charge: async () => ({ debitedAmount: 0 }),
+};
+
+/**
+ * The refund half of `freeChargePort`.
+ *
+ * A composition that charges nothing has nothing to give back, so this accepts every
+ * refund and does nothing — and it is only correct *paired* with `freeChargePort`,
+ * where every `amount` it receives is the 0 that port debited. Composing it with a
+ * real charge port would swallow real refunds; the composition root (slice S5) takes
+ * the pair together or the real Credit_Service for both.
+ */
+export const freeRefundPort: CreditRefundPort = {
+  refund: async () => {},
 };
 
 export interface AssetPublicationRequest {

@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:property": "vitest run test/property",
-    "test:db": "vitest run --no-file-parallelism test/integration/db-schema.test.ts test/integration/account-repository-contract.test.ts test/integration/asset-store-contract.test.ts test/integration/asset-publication.test.ts",
+    "test:db": "vitest run --no-file-parallelism test/integration/db-schema.test.ts test/integration/account-repository-contract.test.ts test/integration/asset-store-contract.test.ts test/integration/asset-publication.test.ts test/integration/credit-balance-store-redis.test.ts",
     "check:boundary": "eslint . && python3 dsp/scripts/check_import_boundary.py",
     "check:properties": "node scripts/audit-properties.mjs"
   },
