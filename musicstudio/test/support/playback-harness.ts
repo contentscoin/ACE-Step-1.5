@@ -86,6 +86,8 @@ export interface RecordedRead {
 export interface InMemoryObjectStore extends AudioObjectPort {
   readonly reads: RecordedRead[];
   put(objectKey: string, bytes: Uint8Array, contentType?: string): void;
+  /** Mirrors `AudioObjectWritePort.remove` so the object-store contract can run against this double. */
+  remove(objectKey: string): void;
 }
 
 /** A byte at index `i` is `i % 256`, so a window's contents identify its offset. */
@@ -114,6 +116,9 @@ export function inMemoryObjectStore(
     reads,
     put: (objectKey, bytes, contentType = 'audio/flac') => {
       objects.set(objectKey, { bytes, contentType });
+    },
+    remove: (objectKey) => {
+      objects.delete(objectKey);
     },
     head: async (objectKey): Promise<AudioObjectMetadata | null> => {
       const object = objects.get(objectKey);

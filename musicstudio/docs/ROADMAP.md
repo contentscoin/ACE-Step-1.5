@@ -225,7 +225,7 @@ provenance 필수, `object_key`) → 식별자 반환. 이 한 함수가 제품�
 
 | 단계 | 내용 | 확인 |
 | --- | --- | --- |
-| **S1** | `AudioObjectPort.put` + 파일시스템 구현(head/read 포함) | 계약 테스트: put → head 크기 일치 → read Range 바이트 일치 |
+| **S1 — 완료** | `AudioObjectWritePort`(`put`·`remove`, 읽기 포트와 **분리** — 재생 서비스가 쓰기 권한을 들 이유가 없음) + `adapters/filesystem-object-store.ts`(head/read/put/remove, 원자적 쓰기, 사이드카에 content type, 루트 탈출 키 거부) | 계약 테스트 23건이 인메모리 더블과 파일시스템 양쪽에서 동일 통과. `end` 포함 경계, 오프셋을 식별하는 바이트, 범위 밖 거부, `../` 거부 |
 | **S2** | DSP HTTP 사이드카 — `normalise_for_storage`부터, 나머지 9개는 같은 틀 | curl로 WAV 보내 48 kHz + 워터마크 버전 응답 |
 | **S3** | `AssetPublicationPort` pg 구현 (S1+S2 사용) + 계약 테스트(더블 vs 실물) | INSERT된 행의 `object_key`가 실제 파일을 가리키고 provenance CHECK 통과 |
 | **S4** | Redis `eval` 심 + 크레딧 스토어 배선 — v0는 `freeChargePort`로 건너뛰어도 됨 | 잔액 차감/환급이 Lua 스크립트로 실제 Redis에서 동작 |
