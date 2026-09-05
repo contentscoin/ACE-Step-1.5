@@ -99,6 +99,14 @@ jobs:
   #
   # A matrix rather than sequential steps: the shards run concurrently, so the
   # split shortens the critical path instead of adding four cold starts to it.
+  #
+  # Sharding shortened the exposure; `test/support/yield-between-tests.ts`
+  # (a `setupFiles` entry) removes the cause. The timeout fires when a worker
+  # spends more than 60 s without a macrotask turn — a CPU-bound file whose tests
+  # only await settled promises never lets the main thread's reply be delivered.
+  # One `setImmediate` before each test lets it through. The heaviest file still
+  # measured 64 s on a contended runner *after* sharding, which is how this was
+  # found; the shards stay for the critical path.
   typescript-tests:
     name: TypeScript tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
