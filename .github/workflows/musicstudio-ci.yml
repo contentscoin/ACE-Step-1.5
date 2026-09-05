@@ -99,6 +99,14 @@ jobs:
   #
   # A matrix rather than sequential steps: the shards run concurrently, so the
   # split shortens the critical path instead of adding four cold starts to it.
+  #
+  # Sharding shortened the exposure; `test/support/yield-between-tests.ts`
+  # (a `setupFiles` entry) removes the cause. The timeout fires when a worker
+  # spends more than 60 s without a macrotask turn — a CPU-bound file whose tests
+  # only await settled promises never lets the main thread's reply be delivered.
+  # One `setImmediate` before each test lets it through. The heaviest file still
+  # measured 64 s on a contended runner *after* sharding, which is how this was
+  # found; the shards stay for the critical path.
   typescript-tests:
     name: TypeScript tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
@@ -250,12 +258,41 @@ jobs:
       - name: Install Node dependencies
         run: npm ci || npm install
 
+      # Slice S5: the composition root is composed here against the real stores, and its
+      # publication path calls the DSP sidecar over HTTP. The sidecar is this repository's
+      # own Python (S2), so it is started in the job rather than pulled as a service image;
+      # `dsp-sidecar-roundtrip.test.ts` runs against the same process.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: musicstudio/dsp/pyproject.toml
+
+      - name: Install the DSP sidecar
+        run: python -m pip install --upgrade pip && pip install -e './dsp[dev]'
+
+      - name: Start the DSP sidecar
+        working-directory: musicstudio/dsp
+        run: |
+          PYTHONPATH=src nohup python -m musicstudio_dsp.sidecar > sidecar.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8002/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8002/health || { cat sidecar.log; exit 1; }
+
       # A throwaway database, because the suite creates the whole product schema in the
       # `public` namespace — see the header of `test/integration/db-schema.test.ts`.
-      # The Redis URL gates the credit-store contract the same way; without it that
-      # file skips, which is what happens on a developer machine with no server.
-      - name: Migration acceptance
+      # The Redis and DSP URLs gate their files the same way; without them those files
+      # skip, which is what happens on a developer machine with no server.
+      - name: Migration acceptance and composition
         run: npm run test:db
         env:
           MUSICSTUDIO_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/musicstudio_test
           MUSICSTUDIO_REDIS_URL: redis://localhost:6379
+          MUSICSTUDIO_DSP_URL: http://127.0.0.1:8002
+
+      - name: Sidecar log
+        if: failure()
+        working-directory: musicstudio/dsp
+        run: cat sidecar.log || true

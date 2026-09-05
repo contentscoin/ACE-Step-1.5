@@ -112,5 +112,10 @@ export {
   type EngineStatisticsPort,
 } from './ports';
 export type { JobRuntime } from './runtime';
+export {
+  SelfPollingJobOrchestrator,
+  startTimeoutSweep,
+  type SelfPollingOptions,
+} from './self-polling-orchestrator';
 export { sleepVia } from './scheduling';
 export { isOverdue, sweepTimedOutJobs, type SweepResult } from './timeout-sweep';

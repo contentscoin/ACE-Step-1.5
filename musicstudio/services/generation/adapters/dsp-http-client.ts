@@ -58,6 +58,18 @@ export interface DspClient {
   normaliseForStorage(audio: Uint8Array): Promise<NormalisedAudio>;
 }
 
+/**
+ * The HTTP client, which can also ask the sidecar whether it is there.
+ *
+ * `health` is not on `DspClient`: the generation path never needs it, and a port that carried
+ * it would make every scripted double implement a probe. The composition root's readiness
+ * check is the only caller, and it holds this wider type.
+ */
+export interface DspHttpClient extends DspClient {
+  /** `GET /health` — the task names the sidecar dispatches. Rejects when it is unreachable. */
+  health(): Promise<readonly string[]>;
+}
+
 export interface DspHttpClientConfig {
   /** Sidecar origin, e.g. `http://127.0.0.1:8002`. No trailing slash needed. */
   readonly baseUrl: string;
@@ -111,9 +123,16 @@ function readBoolean(value: unknown, field: string): boolean {
   return value;
 }
 
-export function createDspHttpClient(config: DspHttpClientConfig): DspClient {
+export function createDspHttpClient(config: DspHttpClientConfig): DspHttpClient {
   const fetchImpl = config.fetchImpl ?? globalThis.fetch;
   const origin = config.baseUrl.replace(/\/+$/, '');
+
+  async function health(): Promise<readonly string[]> {
+    const response = await fetchImpl(`${origin}/health`, { method: 'GET' });
+    if (!response.ok) throw new Error(`dsp sidecar health answered ${String(response.status)}`);
+    const payload = (await response.json()) as { readonly tasks?: unknown };
+    return Array.isArray(payload.tasks) ? payload.tasks.map(String) : [];
+  }
 
   async function call(task: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
     const response = await fetchImpl(`${origin}/tasks/${task}`, {
@@ -137,6 +156,7 @@ export function createDspHttpClient(config: DspHttpClientConfig): DspClient {
   }
 
   return {
+    health,
     async normaliseForStorage(audio) {
       const result = await call(NORMALISE_TASK, {
         audio_base64: Buffer.from(audio).toString('base64'),

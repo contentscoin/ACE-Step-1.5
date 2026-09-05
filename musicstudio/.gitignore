@@ -9,6 +9,9 @@ build/
 coverage/
 *.tsbuildinfo
 
+# The filesystem object store's default root (`MUSICSTUDIO_OBJECT_STORE_DIR`, slice S1/S5).
+data/
+
 # DSP worker
 dsp/.venv/
 dsp/**/__pycache__/
