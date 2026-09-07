@@ -150,6 +150,8 @@ describeComposed('the composition root against PostgreSQL, Redis and a scripted 
       // it is what makes the wav download below reachable; the free-plan refusal is its own
       // case, on its own gateway, because the port answers one plan for every account.
       MUSICSTUDIO_DEFAULT_PLAN_ID: 'creator',
+      // Slice S7: the SPA calls from its own origin, so the gateway has to say it may.
+      MUSICSTUDIO_CORS_ORIGINS: 'https://studio.test',
       // The engine URL is never contacted — the transport is scripted — but it is what a
       // deployment would set, and the config must accept it.
       MUSICSTUDIO_ENGINE_URL: 'http://127.0.0.1:8001',
@@ -527,6 +529,34 @@ describeComposed('the composition root against PostgreSQL, Redis and a scripted 
     } finally {
       await freeGateway.close();
     }
+  });
+
+  it('answers a browser preflight for a configured origin, and nothing for another', async () => {
+    // Slice S7: the SPA is served from its own origin, so without this every call it makes is
+    // refused by the browser before the gateway sees it. The composition above configures
+    // `https://studio.test` through `MUSICSTUDIO_CORS_ORIGINS`.
+    const allowed = await gateway.app.inject({
+      method: 'OPTIONS',
+      url: '/v1/library/assets',
+      headers: {
+        origin: 'https://studio.test',
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization',
+      },
+    });
+    expect(allowed.statusCode).toBeLessThan(300);
+    expect(allowed.headers['access-control-allow-origin']).toBe('https://studio.test');
+    // The headers the SPA reads off a download it did not originate: 13.6's name, 13.10's rate.
+    expect(String(allowed.headers['access-control-expose-headers'])).toContain('content-disposition');
+
+    const refused = await gateway.app.inject({
+      method: 'OPTIONS',
+      url: '/v1/library/assets',
+      headers: { origin: 'https://evil.test', 'access-control-request-method': 'GET' },
+    });
+    // No header rather than an error: the browser refuses the read, which is the outcome, and
+    // the gateway says nothing about who else is allowed.
+    expect(refused.headers['access-control-allow-origin']).toBeUndefined();
   });
 
   it('refuses a request nobody is signed in for, and a song outside Requirement 4.2', async () => {

@@ -43,6 +43,7 @@ type Loaded = { readonly state: 'loading' } | { readonly state: 'done'; readonly
 export function PublicPage({ token }: PublicPageProps): ReactNode {
   const api = useStudioApi();
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' });
+  const [streamUrl, setStreamUrl] = useState('');
 
   useEffect(() => {
     if (token === null) {
@@ -50,13 +51,44 @@ export function PublicPage({ token }: PublicPageProps): ReactNode {
       return;
     }
     let live = true;
-    void api.publicPage(token).then((page) => {
-      if (live) setLoaded({ state: 'done', page });
-    });
+    void api.publicPage(token).then(
+      (page) => {
+        if (live) setLoaded({ state: 'done', page });
+      },
+      () => {
+        // A backend with no sharing surface answers the same as a revoked link, because from
+        // this screen they are the same fact: there is no page at this token. The alternative
+        // — a technical error on a visitor's screen — names a capability they cannot act on.
+        if (live) setLoaded({ state: 'done', page: null });
+      },
+    );
     return () => {
       live = false;
     };
   }, [api, token]);
+
+  // The audio, once there is a page to play. Released on the way out; see `AudioSource`.
+  const assetId = loaded.state === 'done' ? (loaded.page?.assetId ?? null) : null;
+  useEffect(() => {
+    if (assetId === null) return;
+    let live = true;
+    let acquired: { release: () => void } | null = null;
+    void api.audioSource(assetId).then(
+      (source) => {
+        acquired = source;
+        if (live) setStreamUrl(source.url);
+        else source.release();
+      },
+      () => {
+        if (live) setStreamUrl('');
+      },
+    );
+    return () => {
+      live = false;
+      setStreamUrl('');
+      acquired?.release();
+    };
+  }, [api, assetId]);
 
   if (loaded.state === 'loading') {
     return (
@@ -92,8 +124,8 @@ export function PublicPage({ token }: PublicPageProps): ReactNode {
 
         <div style={panel}>
           <h3 style={{ marginTop: 0, fontSize: 16 }}>재생</h3>
-          {/* The stream URL is the only thing a visitor needs; nothing here names the owner. */}
-          <audio controls src={api.streamUrl(page.assetId)} style={{ width: '100%' }}>
+          {/* The audio is the only thing a visitor needs; nothing here names the owner. */}
+          <audio controls src={streamUrl} style={{ width: '100%' }}>
             <track kind="captions" />
           </audio>
           <div style={{ ...row, gap: 6, flexWrap: 'wrap', marginTop: 8 }}>

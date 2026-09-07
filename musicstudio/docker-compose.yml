@@ -78,6 +78,10 @@ services:
       # so the operator names the plan. `creator`, because a single-tenant deployment has no
       # one to withhold wav and flac from; set `free` to see the 402 the rule produces.
       MUSICSTUDIO_DEFAULT_PLAN_ID: ${MUSICSTUDIO_DEFAULT_PLAN_ID:-creator}
+      # The SPA is served from its own origin (slice S7), so the gateway has to say which ones
+      # may read its answers. Empty by default here too: a stack brought up for `curl` needs
+      # none, and a wildcard is refused at boot rather than left as a default nobody narrows.
+      MUSICSTUDIO_CORS_ORIGINS: ${MUSICSTUDIO_CORS_ORIGINS:-}
       # Convenient here, deliberately off by default elsewhere: a compose stack is brought up
       # from nothing often enough that applying the schema by hand each time is friction.
       MUSICSTUDIO_MIGRATE_ON_START: 'true'

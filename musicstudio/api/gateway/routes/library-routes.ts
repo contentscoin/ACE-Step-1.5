@@ -9,6 +9,7 @@ import {
   createPlaylistSchema,
   deleteAssetSchema,
   deletePlaylistSchema,
+  getAssetSchema,
   listAssetsSchema,
   listPlaylistsSchema,
   listSoundPackAssetsSchema,
@@ -77,6 +78,19 @@ export function registerLibraryRoutes(app: FastifyInstance, options: LibraryRout
         assets: page.assets,
         ...(page.nextCursor === null ? {} : { nextCursor: encodeLibraryCursor(page.nextCursor) }),
       };
+    },
+  );
+
+  // One asset, for a detail screen. Requirement 11 does not name this route — 11.1 is the
+  // listing — but 11.9's ownership answer is what it exists to give: a client that opened an
+  // asset by identifier needs 404 for "no such asset" and 403 for "not yours" without pulling
+  // a page of the library and searching it. `loadOwned` is the same gate the listing uses.
+  app.get<{ Params: { assetId: string } }>(
+    '/library/assets/:assetId',
+    { schema: getAssetSchema, preHandler },
+    async (request) => {
+      const account = requireAccount(request);
+      return library.loadOwned(account.accountId, request.params.assetId);
     },
   );
 

@@ -26,6 +26,7 @@ import { EnterTransition } from '../components/amicro/EnterTransition';
 import { HoverLift } from '../components/amicro/HoverLift';
 import { TextReveal } from '../components/amicro/TextReveal';
 import { Player } from '../components/playback/Player';
+import { CapabilityUnavailable } from '../components/CapabilityUnavailable';
 import { StatusMessage } from '../components/StatusMessage';
 import { useStudioApi } from '../lib/api/context';
 import { useSound } from '../sound/context';
@@ -102,7 +103,10 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
     const found = await api.findAsset(assetId);
     setAsset(found);
     setName(found?.name ?? '');
-    setShare(await api.shareState(assetId));
+    // A backend with no sharing surface must not take the asset down with it: the asset loaded,
+    // and only the panel below is unanswerable. Before this the rejection propagated out of
+    // `load`, `asset` stayed null, and the screen said the asset did not exist.
+    setShare(await api.shareState(assetId).catch(() => null));
   }, [api, assetId]);
 
   useEffect(() => {
@@ -249,6 +253,12 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
           )}
         </div>
 
+        {share === null ? (
+          <CapabilityUnavailable
+            capability="공개 및 공유"
+            reason="공유 상태를 저장할 곳이 아직 없습니다."
+          />
+        ) : (
         <div style={panel}>
           <h3 style={{ marginTop: 0, fontSize: 16 }}>공유 (Req 14.2–14.4)</h3>
           <label style={row}>
@@ -295,6 +305,7 @@ export function AssetPage({ assetId }: AssetPageProps): ReactNode {
             <p style={{ ...meta, marginTop: 12 }}>비공개 상태입니다 (Req 14.1 — 기본값).</p>
           )}
         </div>
+        )}
       </div>
     </EnterTransition>
   );

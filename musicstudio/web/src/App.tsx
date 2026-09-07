@@ -20,13 +20,19 @@ import type { ReactNode } from 'react';
 
 import { MainRegion, SkipLink } from './a11y/SkipLink';
 import { DemoModeBanner } from './components/DemoModeBanner';
+import { CapabilityUnavailable } from './components/CapabilityUnavailable';
+import { GatewayNotice } from './components/GatewayNotice';
+import { SignIn } from './components/SignIn';
 import { hrefFor, useRoute } from './app/router';
 import { EnterTransition } from './components/amicro/EnterTransition';
 import { HoverLift } from './components/amicro/HoverLift';
 import { TextReveal } from './components/amicro/TextReveal';
 import { CueAnnouncer } from './components/sound/CueAnnouncer';
 import { SoundSettingsPanel } from './components/sound/SoundSettingsPanel';
-import { StudioApiProvider } from './lib/api/context';
+import { StudioApiProvider, useStudioApi } from './lib/api/context';
+import { GatewaySessionProvider, useSessionTokens } from './lib/api/session-context';
+import type { StudioApi } from './lib/api/port';
+import type { Session } from './lib/api/session';
 import { SoundProvider } from './sound/context';
 import { MOTION_CLASSIFICATION_TABLE } from './motion/classification';
 import { useReducedMotion } from './motion/reduced-motion';
@@ -96,7 +102,35 @@ function SystemPage(): ReactNode {
   );
 }
 
-function screenFor(name: string, parameter: string | null): ReactNode {
+/**
+ * The screens a gateway build cannot serve, and what each needs before it can.
+ *
+ * Rendering the screen anyway would leave it in its loading state forever: every call it makes
+ * rejects, and an effect that made one does not render anything for a rejection. These three are
+ * *wholly* unserved — every call they make is on the list in `http-api.ts` — so the screen is
+ * replaced rather than partly disabled. `AssetPage` is the mixed case and handles its own panel.
+ */
+const UNSERVED_SCREENS: Readonly<Record<string, { capability: string; reason: string }>> = {
+  explore: {
+    capability: '탐색 피드',
+    reason: '공개된 자산을 저장할 곳이 아직 없습니다.',
+  },
+  timeline: {
+    capability: '타임라인',
+    reason: '프로젝트를 저장할 곳이 아직 없습니다.',
+  },
+  mastering: {
+    capability: '마스터링과 이펙트',
+    reason: '버전과 이펙트 체인을 저장할 곳이 아직 없습니다.',
+  },
+};
+
+function screenFor(name: string, parameter: string | null, unserved: boolean): ReactNode {
+  const missing = UNSERVED_SCREENS[name];
+  if (unserved && missing !== undefined) {
+    return <CapabilityUnavailable capability={missing.capability} reason={missing.reason} />;
+  }
+
   switch (name) {
     case 'library':
       return <LibraryPage />;
@@ -123,12 +157,44 @@ function screenFor(name: string, parameter: string | null): ReactNode {
   }
 }
 
-export function App(): ReactNode {
+export interface AppProps {
+  /** Omitted in tests and in the design-system build, where the demo backend is the subject. */
+  readonly api?: StudioApi;
+  /** The gateway session, or `null`/absent on a demo build. */
+  readonly session?: Session | null;
+  /** The gateway origin, for the sign-in panel. `null` on a demo build. */
+  readonly gatewayUrl?: string | null;
+}
+
+export function App({ api, session = null, gatewayUrl = null }: AppProps): ReactNode {
+  return (
+    <StudioApiProvider {...(api === undefined ? {} : { api })}>
+      <GatewaySessionProvider session={session}>
+        <SoundProvider>
+          <Shell gatewayUrl={gatewayUrl} />
+        </SoundProvider>
+      </GatewaySessionProvider>
+    </StudioApiProvider>
+  );
+}
+
+/**
+ * The shell, inside the providers so it can read both.
+ *
+ * Separate from `App` for one reason: the gate below asks the api which backend it is and asks
+ * the session whether there is a credential, and a component cannot read a context its own
+ * element provides.
+ */
+function Shell({ gatewayUrl }: { readonly gatewayUrl: string | null }): ReactNode {
   const route = useRoute();
+  const api = useStudioApi();
+  const tokens = useSessionTokens();
+  // A gateway build with no credential can render nothing truthfully: every screen's data is
+  // behind Requirement 1's authentication. So the shell shows the panel in place of the screen
+  // — the navigation stays, because the nav is not data.
+  const needsSignIn = api.backend.kind === 'gateway' && tokens === null && gatewayUrl !== null;
 
   return (
-    <StudioApiProvider>
-      <SoundProvider>
         <main style={{ maxWidth: 980, margin: '0 auto', padding: 24, lineHeight: 1.6 }}>
           {/* First in the DOM, so it is the first Tab stop — see `a11y/SkipLink.tsx`. */}
           <SkipLink />
@@ -139,6 +205,8 @@ export function App(): ReactNode {
             passing the sentence that says nothing will be generated.
           */}
           <DemoModeBanner />
+          {/* The mirror image, for a gateway build: what this deployment cannot do. */}
+          <GatewayNotice />
           <header style={{ marginBottom: 20 }}>
             <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>
               <TextReveal text="MusicStudio" />
@@ -182,13 +250,15 @@ export function App(): ReactNode {
               screen rather than in the nav they just left. */}
           <MainRegion routeKey={`${route.name}/${route.parameter ?? ''}`}>
             <div key={`${route.name}/${route.parameter ?? ''}`}>
-              {screenFor(route.name, route.parameter)}
+              {needsSignIn ? (
+                <SignIn baseUrl={gatewayUrl} />
+              ) : (
+                screenFor(route.name, route.parameter, api.backend.kind === 'gateway')
+              )}
             </div>
           </MainRegion>
           {/* Requirement 32.15: every played cue's sentence, within the same task it fired in. */}
           <CueAnnouncer />
         </main>
-      </SoundProvider>
-    </StudioApiProvider>
   );
 }

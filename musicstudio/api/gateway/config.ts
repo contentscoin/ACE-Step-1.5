@@ -69,6 +69,18 @@ export interface GatewayConfig {
    * decision, not the code's. See `services/library/adapters/configured-plan.ts`.
    */
   readonly defaultPlanId: string;
+  /**
+   * Origins allowed to call this gateway from a browser (slice S7).
+   *
+   * Empty by default, which means no cross-origin browser call is permitted — the honest
+   * default, because a gateway that allowed every origin would let any page a user visits make
+   * authenticated requests with a token it phished from `localStorage`. The SPA is deployed
+   * separately (§4.5 track E), so its origin is a deployment fact and belongs in configuration.
+   *
+   * Credentials travel as a `Bearer` header rather than a cookie, so this is an allowlist for
+   * the *response* being readable, not a cookie policy.
+   */
+  readonly corsOrigins: readonly string[];
   readonly engine: EngineConfig;
   readonly google: SocialProviderCredentials | null;
   readonly apple: SocialProviderCredentials | null;
@@ -95,6 +107,7 @@ export function loadGatewayConfig(env: Environment = process.env): GatewayConfig
       readNonEmpty(env.MUSICSTUDIO_OBJECT_STORE_DIR) ?? DEFAULT_OBJECT_STORE_DIRECTORY,
     migrateOnStart: readFlag(env, 'MUSICSTUDIO_MIGRATE_ON_START'),
     defaultPlanId: readPlanId(env.MUSICSTUDIO_DEFAULT_PLAN_ID),
+    corsOrigins: readOrigins(env.MUSICSTUDIO_CORS_ORIGINS),
     engine: {
       baseUrl: readNonEmpty(env.MUSICSTUDIO_ENGINE_URL) ?? DEFAULT_ENGINE_URL,
       apiToken: readNonEmpty(env.MUSICSTUDIO_ENGINE_API_TOKEN) ?? null,
@@ -167,6 +180,34 @@ function readPort(value: string | undefined): number {
     throw new Error('MUSICSTUDIO_PORT must be an integer between 1 and 65535.');
   }
   return port;
+}
+
+/**
+ * A comma-separated origin list, each entry checked to be one.
+ *
+ * `*` is refused rather than passed through: it would make every authenticated route readable
+ * by any page the user has open, and the mistake is easy to make and invisible afterwards.
+ */
+function readOrigins(value: string | undefined): readonly string[] {
+  const raw = readNonEmpty(value);
+  if (raw === undefined) return [];
+
+  return raw.split(',').map((entry) => {
+    const origin = entry.trim();
+    if (origin === '*') {
+      throw new Error(
+        'MUSICSTUDIO_CORS_ORIGINS must list origins; "*" would expose every authenticated route to any page.',
+      );
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      throw new Error(`MUSICSTUDIO_CORS_ORIGINS entry ${JSON.stringify(origin)} is not a URL.`);
+    }
+    // An origin is scheme + host + port and nothing else; a path here would silently never match.
+    return parsed.origin;
+  });
 }
 
 /** Rejected at boot rather than at the first download, where it would look like a 402. */

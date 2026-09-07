@@ -59,6 +59,7 @@ interface AssetRow extends Record<string, unknown> {
   readonly sample_rate: number;
   readonly channels: number;
   readonly duration_ms: number;
+  readonly is_loop: boolean;
   readonly tags: readonly string[] | null;
   readonly stem_source_asset_id: string | null;
 }
@@ -74,7 +75,7 @@ interface AssetRow extends Record<string, unknown> {
 const SELECT_COLUMNS = `
   a.id, a.owner_id, a.name, a.asset_kind, a.caption, a.lyrics, a.play_count,
   a.created_at, a.is_deleted, a.deleted_at, a.object_key, a.sample_rate, a.channels,
-  a.duration_ms,
+  a.duration_ms, a.is_loop,
   (SELECT coalesce(array_agg(t.tag ORDER BY t.created_at, t.tag), ARRAY[]::text[])
      FROM asset_tag t WHERE t.asset_id = a.id) AS tags,
   (SELECT l.parent_asset_id FROM lineage l
@@ -101,6 +102,7 @@ function toRecord(row: AssetRow): LibraryAssetRecord {
     sampleRate: row.sample_rate,
     channels: row.channels,
     durationMs: row.duration_ms,
+    isLoop: row.is_loop,
     stemSourceAssetId: row.stem_source_asset_id,
   };
 }

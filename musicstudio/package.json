@@ -30,6 +30,7 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
     "bcrypt": "^6.0.0",
     "fastify": "^5.11.0",
     "ioredis": "^5.11.1",

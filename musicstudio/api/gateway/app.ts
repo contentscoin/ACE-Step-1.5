@@ -1,3 +1,4 @@
+import cors from '@fastify/cors';
 import Fastify, { LogController, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 
 import type { EngineAdapterFactoryPort } from '../../adapters/registry/ports';
@@ -193,6 +194,14 @@ export interface GatewayDependencies {
   readonly creditService?: CreditService;
   /** Mounts the Requirement 17 API key routes and the developer surface when supplied. */
   readonly publicApi?: GatewayPublicApiDependencies;
+  /**
+   * Origins a browser may call this gateway from (slice S7).
+   *
+   * Empty or absent registers no CORS at all, which is what a gateway with no browser client
+   * should do: a same-origin caller needs none, and every cross-origin one is then refused by
+   * the browser rather than by a policy someone has to read.
+   */
+  readonly corsOrigins?: readonly string[];
   readonly fastifyOptions?: FastifyServerOptions;
 }
 
@@ -213,6 +222,34 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
     logController: new LogController({ disableRequestLogging: true }),
     ...deps.fastifyOptions,
   });
+
+  // Before the routes, so a preflight is answered by the plugin rather than falling through to
+  // the 404 handler — which is what a browser reads as "this API refuses me" with no detail.
+  if (deps.corsOrigins !== undefined && deps.corsOrigins.length > 0) {
+    const allowed = new Set(deps.corsOrigins);
+    void app.register(cors, {
+      // A function rather than the array form, so an origin that is not on the list is simply
+      // not echoed — no header, no access — instead of the plugin throwing an error the browser
+      // reports as a network failure.
+      origin: (origin, callback) => {
+        callback(null, origin !== undefined && allowed.has(origin));
+      },
+      methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+      allowedHeaders: ['authorization', 'content-type', 'range'],
+      // The three the SPA reads off a response it did not originate the headers of: the file
+      // name (13.6), the rate (13.10) and the purpose (33.19). Without this a cross-origin
+      // client sees the body and none of the headers that say what it is.
+      exposedHeaders: [
+        'content-disposition',
+        'content-range',
+        'accept-ranges',
+        'x-play-count',
+        'x-sample-rate',
+        'x-usage-purpose',
+      ],
+      maxAge: 600,
+    });
+  }
 
   registerErrorHandler(app);
   registerAuthenticationDecorator(app);
