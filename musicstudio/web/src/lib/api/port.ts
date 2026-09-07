@@ -83,6 +83,35 @@ export interface PreviewStream {
   readonly durationMs: number;
 }
 
+/**
+ * Something an `<audio>` element can play, and the caller's obligation to let it go.
+ *
+ * ### Why this is asked for asynchronously
+ *
+ * It was `streamUrl(assetId): string`, which worked while the only backend held its audio in
+ * memory. A gateway's audio is behind Requirement 12.6's ownership check, and an `<audio>`
+ * element cannot send an `Authorization` header — it issues its own request, with its own
+ * headers, and nothing in the DOM lets a page add one. So a URL cannot be *computed*; the bytes
+ * have to be fetched by something that can carry the credential, and that is a promise.
+ *
+ * ### Why the gateway client does not simply put the token in the URL
+ *
+ * It is the obvious alternative and it is the one this codebase already refuses elsewhere: the
+ * engine transport sends its token as a header rather than in the payload "so a credential never
+ * appears in a payload that gets logged". A URL is worse than a payload — it reaches access
+ * logs, `Referer` headers, browser history and the address bar. The cost of not doing it is that
+ * the gateway client downloads the object before playing rather than streaming it, which is
+ * stated in `http-api.ts` and is the thing to revisit with a short-lived, stream-scoped ticket.
+ *
+ * `release` is idempotent and is a no-op where nothing was allocated, so a caller may always
+ * call it exactly once without asking which backend answered.
+ */
+export interface AudioSource {
+  /** A URL the element can load, or `''` where no audio could be produced. */
+  readonly url: string;
+  release(): void;
+}
+
 /** A `GenerationVersion` as a screen needs it — the domain's fields, minus the storage ones. */
 export interface StudioVersion {
   readonly id: string;
@@ -162,8 +191,8 @@ export interface StudioApi {
   lyricLineAt(assetId: string, positionMs: number): Promise<ActiveLyricLine | null>;
   /** Requirement 12.9. */
   positionAfter(assetId: string, elapsedMs: number): Promise<LoopPosition>;
-  /** Requirements 12.1, 12.3 — a URL the `<audio>` element can seek within. */
-  streamUrl(assetId: string): string;
+  /** Requirements 12.1, 12.3 — audio the `<audio>` element can play and seek within. */
+  audioSource(assetId: string): Promise<AudioSource>;
 
   /* ---------------------------------------------------------------- sharing */
 

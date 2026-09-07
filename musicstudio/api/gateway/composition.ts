@@ -281,6 +281,7 @@ export function composeGateway(config: GatewayConfig, overrides: CompositionOver
     engines: { registry, adapterFactory },
     generation: { orchestrator, events, runtime, songGateway },
     library: { library, playback, downloads },
+    corsOrigins: config.corsOrigins,
     fastifyOptions: { logger: overrides.requestLogging ?? true },
   });
 

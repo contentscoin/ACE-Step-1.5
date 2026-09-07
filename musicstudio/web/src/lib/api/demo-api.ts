@@ -367,22 +367,26 @@ export function createDemoApi(options: DemoApiOptions = {}): StudioApi {
       return positionAt(elapsedMs, asset.durationMs, asset.isLoop);
     },
 
-    streamUrl(assetId) {
+    async audioSource(assetId) {
       // This used to return `demo:stream/<id>` with a comment claiming the player synthesised a
       // tone from it. The player never read it and never made a sound — "재생" advanced a timer
-      // over silence. It now returns a URL an `<audio>` element can actually load, which is what
+      // over silence. It now returns audio an `<audio>` element can actually load, which is what
       // the port always said it was.
+      //
+      // The URL is cached and `release` is a no-op: this backend holds one tone per asset for the
+      // whole session, so revoking it on unmount would mean re-encoding it on the next visit to
+      // the same screen. The gateway client, whose objects are large and per-session, does revoke.
       const asset = assets.get(assetId);
-      if (asset === undefined) return '';
+      if (asset === undefined) return { url: '', release: () => {} };
       const cached = streams.get(assetId);
-      if (cached !== undefined) return cached;
+      if (cached !== undefined) return { url: cached, release: () => {} };
       // `createObjectURL` is absent under some test DOMs. Falling back to an empty string keeps
       // the player mounting there — it renders a transport with nothing loaded, which is exactly
       // what an environment with no media stack can honestly offer.
-      if (typeof URL.createObjectURL !== 'function') return '';
+      if (typeof URL.createObjectURL !== 'function') return { url: '', release: () => {} };
       const url = URL.createObjectURL(demoFileFor(asset).blob);
       streams.set(assetId, url);
-      return url;
+      return { url, release: () => {} };
     },
 
     async setPublished(assetId, isPublished, remixAllowed) {

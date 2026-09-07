@@ -70,6 +70,30 @@ describe('gateway configuration', () => {
     expect(config.migrateOnStart).toBe(true);
   });
 
+  // Slice S7: the SPA is deployed separately, so the origins it calls from are a deployment
+  // fact. Empty by default — a gateway with no browser client should permit no cross-origin
+  // call at all, rather than one that has to be narrowed later.
+  it('permits no browser origin unless one is configured, and normalises the ones that are', () => {
+    expect(loadGatewayConfig(REQUIRED).corsOrigins).toEqual([]);
+    expect(
+      loadGatewayConfig({
+        ...REQUIRED,
+        MUSICSTUDIO_CORS_ORIGINS: 'https://studio.example.com, http://localhost:5173/app',
+      }).corsOrigins,
+      // The path is dropped: an origin is scheme, host and port, and a path here would make a
+      // rule that silently never matches.
+    ).toEqual(['https://studio.example.com', 'http://localhost:5173']);
+  });
+
+  it('refuses a wildcard origin, which would expose every authenticated route', () => {
+    expect(() => loadGatewayConfig({ ...REQUIRED, MUSICSTUDIO_CORS_ORIGINS: '*' })).toThrow(
+      'MUSICSTUDIO_CORS_ORIGINS',
+    );
+    expect(() =>
+      loadGatewayConfig({ ...REQUIRED, MUSICSTUDIO_CORS_ORIGINS: 'studio.example.com' }),
+    ).toThrow('MUSICSTUDIO_CORS_ORIGINS');
+  });
+
   // Requirement 20.12's domain applies to configuration too: an out-of-range quota would be
   // refused by the registry at boot anyway, and refusing it here names the variable.
   it('rejects an out-of-range daily quota, an unknown execution location and a non-boolean flag', () => {

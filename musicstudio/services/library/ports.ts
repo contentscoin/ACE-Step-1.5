@@ -27,6 +27,14 @@ export interface LibraryAssetRecord extends LibraryAssetSummary {
   readonly sampleRate: number;
   readonly channels: number;
   readonly durationMs: number;
+  /**
+   * Requirement 12.9's loop flag, carried here because a detail screen needs it.
+   *
+   * The listing does not use it; `Playback_Service` reads its own narrower record. It is on the
+   * library record so that one request for an asset answers what a detail page shows, rather
+   * than a page assembling itself from a library call plus a playback call plus a default.
+   */
+  readonly isLoop: boolean;
   /** Requirement 13.5 — set on a `stem` asset, naming the asset it was split from. */
   readonly stemSourceAssetId: string | null;
 }

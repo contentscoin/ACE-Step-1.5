@@ -32,6 +32,7 @@ export function assetRecord(overrides: Partial<LibraryAssetRecord> = {}): Librar
     sampleRate: 48_000,
     channels: 2,
     durationMs: 60_000,
+    isLoop: false,
     stemSourceAssetId: null,
     ...overrides,
   };

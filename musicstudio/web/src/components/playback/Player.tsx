@@ -66,10 +66,38 @@ export function Player({ asset }: PlayerProps): ReactNode {
   /** True once the element has told us it has media. Until then the interval is the only clock. */
   const [audioReady, setAudioReady] = useState(false);
 
-  const streamUrl = api.streamUrl(asset.id);
+  const [streamUrl, setStreamUrl] = useState('');
 
   useEffect(() => {
     void api.waveform(asset.id, DISPLAY_BUCKETS).then(setWaveform);
+  }, [api, asset.id]);
+
+  // The audio, asked for rather than computed — see `AudioSource` in `port.ts`. A source that
+  // arrives after the screen moved on is released immediately instead of being handed to an
+  // element that is no longer mounted; without that, switching assets while a large object is
+  // in flight leaks one object URL per switch.
+  useEffect(() => {
+    let live = true;
+    let acquired: { release: () => void } | null = null;
+
+    void api.audioSource(asset.id).then(
+      (source) => {
+        acquired = source;
+        if (live) setStreamUrl(source.url);
+        else source.release();
+      },
+      () => {
+        // Nothing to play from — a refused stream, a network failure. The transport still runs
+        // on its interval, which is what the header describes for an element that cannot load.
+        if (live) setStreamUrl('');
+      },
+    );
+
+    return () => {
+      live = false;
+      setStreamUrl('');
+      acquired?.release();
+    };
   }, [api, asset.id]);
 
   // Play state to the element. `play()` rejects when the browser has no gesture to attach the

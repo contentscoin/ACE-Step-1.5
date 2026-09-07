@@ -151,6 +151,11 @@ plan, and this install has no billing, so the deployment names one plan for ever
 defaults to `free`, which refuses them with a 402 naming the plans that would allow it — set
 `creator` or `studio` on a single-tenant install.
 
+**`MUSICSTUDIO_CORS_ORIGINS`** is what lets the SPA call this gateway from its own origin — a
+comma-separated allowlist, e.g. `https://studio.example.com,http://localhost:5173`. It is empty
+by default, which permits no cross-origin browser call at all, and `*` is refused at boot: it
+would make every authenticated route readable by any page the user has open.
+
 What is still v0 in this composition is named in `api/gateway/composition.ts`: the job store,
 queue and event bus are in-memory (a restart forgets in-flight jobs), no credits are charged,
 no moderation service is composed, nothing is publicly shareable (so a stream is owner-only),
@@ -173,6 +178,9 @@ npm run test:db          # needs PostgreSQL 16 (+ Redis, + the DSP sidecar for t
 cd web
 npm install
 npm run dev              # Vite dev server against the in-browser demo backend
+# …or against a running gateway (slice S7). Its presence is what selects the backend, and the
+# demo banner disappears by itself because `api.backend` says so — there is no second switch.
+VITE_MUSICSTUDIO_API_URL=http://localhost:8080 npm run dev
 npm run build            # motion + sound-budget + a11y gates, then tsc and vite build
 npm test                 # vitest + happy-dom
 

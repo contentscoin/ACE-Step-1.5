@@ -122,6 +122,36 @@ export const listAssetsSchema = {
   },
 } as const;
 
+/**
+ * One asset, in full.
+ *
+ * A wider response than the listing's summary: a detail screen needs the length, the rate, the
+ * channel count and the loop flag, and a listing does not. `additionalProperties` stays true on
+ * `assetSummary`, so this is the same object with more of it declared rather than a second shape.
+ */
+export const getAssetSchema = {
+  params: assetIdParams,
+  response: {
+    200: {
+      ...assetSummary,
+      required: [...assetSummary.required, 'durationMs', 'sampleRate', 'channels', 'isLoop'],
+      properties: {
+        ...assetSummary.properties,
+        durationMs: { type: 'integer' },
+        sampleRate: { type: 'integer' },
+        channels: { type: 'integer' },
+        isLoop: { type: 'boolean' },
+        objectKey: { type: ['string', 'null'] },
+        deletedAtMs: { type: ['integer', 'null'] },
+        stemSourceAssetId: { type: ['string', 'null'] },
+      },
+    },
+    401: errorResponse,
+    403: errorResponse,
+    404: errorResponse,
+  },
+} as const;
+
 /** Requirement 11.5. */
 export const renameAssetSchema = {
   params: assetIdParams,
