@@ -1,50 +1,41 @@
-import { createAccountService } from '../../services/account/account-service';
-import { createLoggingEmailSender } from '../../services/account/adapters/logging-email-sender';
-import { createRedisConnection } from '../../services/account/adapters/redis-client';
-import { createRedisLoginAttemptStore } from '../../services/account/adapters/redis-login-attempt-store';
-import { createRedisSessionStore } from '../../services/account/adapters/redis-session-store';
-import type { AccountRepository } from '../../services/account/account-repository';
-
-import { buildGatewayApp } from './app';
-import { loadGatewayConfig } from './config';
-import { buildSocialProviders } from './social-providers';
+import { composeGateway, type ComposedGateway } from './composition';
+import { loadGatewayConfig, type Environment } from './config';
+import { applyPendingMigrations } from './database';
 
 /**
- * Production bootstrap: configuration -> real adapters -> app -> listen.
+ * Production bootstrap: configuration -> composition -> listen.
  *
- * Composition only, no logic, therefore no unit tests; the behaviour it wires
- * is covered through `buildGatewayApp` with injected doubles.
+ * Composition only, no logic, therefore no unit tests of its own; the composition it calls is
+ * exercised by `test/integration/composition-root.test.ts` through `app.inject()`, and the
+ * behaviour behind every route by the suites over `buildGatewayApp`.
  *
- * The PostgreSQL-backed `AccountRepository` arrives with the schema work in
- * task 1.1, so it is injected here rather than constructed.
+ * Signals stop the loops before the listener: a poll that fires during shutdown would try to
+ * publish an asset through a pool that is closing.
  */
-export interface BootstrapDependencies {
-  readonly repository: AccountRepository;
-}
+export async function startGateway(env: Environment = process.env): Promise<ComposedGateway> {
+  const config = loadGatewayConfig(env);
 
-export async function startGateway(deps: BootstrapDependencies): Promise<void> {
-  const config = loadGatewayConfig();
-  const redis = createRedisConnection(config.redisUrl);
+  if (config.migrateOnStart) {
+    const applied = await applyPendingMigrations(config.databaseUrl);
+    process.stdout.write(`${JSON.stringify({ event: 'database.migrated', applied })}\n`);
+  }
 
-  const accountService = createAccountService({
-    repository: deps.repository,
-    sessionStore: createRedisSessionStore({ commands: redis }),
-    loginAttemptStore: createRedisLoginAttemptStore({ commands: redis }),
-    emailSender: createLoggingEmailSender(),
-    jwtSecret: config.jwtSecret,
-    publicBaseUrl: config.publicBaseUrl,
-    passwordHashCost: config.passwordHashCost,
-    oauthProviders: buildSocialProviders(config),
-  });
+  const gateway = composeGateway(config);
+  await gateway.start();
 
-  const app = buildGatewayApp({ accountService, fastifyOptions: { logger: true } });
-
-  const shutdown = async (): Promise<void> => {
-    await app.close();
-    await redis.close();
+  const shutdown = (signal: NodeJS.Signals): void => {
+    process.stdout.write(`${JSON.stringify({ event: 'gateway.stopping', signal })}\n`);
+    void gateway.close().then(
+      () => process.exit(0),
+      (error: unknown) => {
+        process.stderr.write(`${JSON.stringify({ event: 'gateway.stop_failed', error: String(error) })}\n`);
+        process.exit(1);
+      },
+    );
   };
-  process.once('SIGTERM', () => void shutdown());
-  process.once('SIGINT', () => void shutdown());
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
 
-  await app.listen({ host: config.host, port: config.port });
+  await gateway.app.listen({ host: config.host, port: config.port });
+  return gateway;
 }

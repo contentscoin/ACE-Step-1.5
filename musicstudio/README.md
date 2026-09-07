@@ -92,6 +92,42 @@ Both run in `.github/workflows/musicstudio-ci.yml`, which is path-filtered to
 - `dsp/pyproject.toml` — DSP worker deps, resolved separately from the engine's PyTorch/CUDA stack.
 - The repository root `package.json` (VitePress docs) and `pyproject.toml` (ACE-Step engine) are **never modified**.
 
+## Running the gateway (slice S5)
+
+`api/gateway/main.ts` is the composition root: PostgreSQL for accounts and assets, Redis
+for sessions, the ACE-Step adapter over HTTP, the DSP sidecar over HTTP and a filesystem
+object store. Four things are required; everything else defaults to a local setup.
+
+```bash
+# 1. Stores (any PostgreSQL 16 and Redis 7 will do)
+export MUSICSTUDIO_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/musicstudio
+export MUSICSTUDIO_REDIS_URL=redis://127.0.0.1:6379
+export MUSICSTUDIO_JWT_SECRET=$(openssl rand -hex 32)
+export MUSICSTUDIO_PUBLIC_BASE_URL=http://127.0.0.1:8080
+
+# 2. Schema
+npm run db:migrate                     # or MUSICSTUDIO_MIGRATE_ON_START=true
+
+# 3. The two other processes, in their own terminals
+(cd .. && ./run_api_server.sh)         # ACE-Step on :8001   → MUSICSTUDIO_ENGINE_URL
+(cd dsp && PYTHONPATH=src python -m musicstudio_dsp.sidecar)   # DSP on :8002 → MUSICSTUDIO_DSP_URL
+
+# 4. Gateway
+npm start                              # :8080; MUSICSTUDIO_HOST / MUSICSTUDIO_PORT
+curl -s localhost:8080/ready           # {"status":"ready","checks":{database,redis,dsp,engine}}
+```
+
+`GET /health` is liveness; `GET /ready` reports each dependency and answers 503 only when a
+store is down — an unreachable engine or sidecar is `degraded`, and the health monitor keeps
+probing. Optional settings: `MUSICSTUDIO_ENGINE_API_TOKEN`, `MUSICSTUDIO_ENGINE_EXECUTION_LOCATION`
+(`local`|`remote`), `MUSICSTUDIO_ENGINE_WEIGHT_LICENSE_ID` (recorded on every asset,
+Requirement 33.7), `MUSICSTUDIO_ENGINE_DAILY_MAX_REQUESTS` / `_GPU_SECONDS`,
+`MUSICSTUDIO_OBJECT_STORE_DIR` (default `data/objects`).
+
+What is still v0 in this composition is named in `api/gateway/composition.ts`: the job
+store, queue and event bus are in-memory (a restart forgets in-flight jobs), no credits
+are charged, and no moderation service is composed. `docs/ROADMAP.md` §4.4 tracks each.
+
 ## Local commands
 
 Node 22, Python 3.11–3.12.
@@ -103,7 +139,7 @@ npm run lint             # includes the acestep import boundary rules
 npm run typecheck
 npm test                 # vitest + fast-check (test/property, test/unit, test/e2e)
 npm run check:properties # every Property in design §10 is declared by some test
-npm run test:db          # needs a PostgreSQL 16 server; see test/integration
+npm run test:db          # needs PostgreSQL 16 (+ Redis, + the DSP sidecar for two files); see test/integration
 
 # React SPA
 cd web

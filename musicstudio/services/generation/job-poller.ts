@@ -164,8 +164,17 @@ async function completeJob(
  * Requirement 5.2: schedules the next poll and re-arms itself until the job is
  * terminal. The delay comes from `nextPollDelayMs`, which is 5 seconds normally and
  * the Requirement 6.5 backoff after a failed contact.
+ *
+ * `onSettled` fires once, when the loop stops re-arming on its own — the job reached a
+ * terminal state, a poll was skipped, or a poll threw. A cancelled loop does not fire it.
+ * The composition root uses it to forget the handle it kept for cancellation; without the
+ * callback a long-running process would keep one handle per job ever submitted.
  */
-export function schedulePolling(runtime: JobRuntime, jobId: string): ScheduledTask {
+export function schedulePolling(
+  runtime: JobRuntime,
+  jobId: string,
+  onSettled?: (outcome: { readonly kind: 'settled' } | { readonly kind: 'threw'; readonly error: unknown }) => void,
+): ScheduledTask {
   let cancelled = false;
   let current: ScheduledTask | null = null;
 
@@ -173,10 +182,21 @@ export function schedulePolling(runtime: JobRuntime, jobId: string): ScheduledTa
     if (cancelled) return;
     current = runtime.scheduler.after(delayMs, () => {
       void (async () => {
-        const result = await pollJobOnce(runtime, jobId);
+        let result: PollResult;
+        try {
+          result = await pollJobOnce(runtime, jobId);
+        } catch (error: unknown) {
+          // A poll that throws — a store that is down, a registry that lost the engine —
+          // must not become an unhandled rejection in a fire-and-forget timer. The job
+          // stays in whatever state it was; the Requirement 5.8 sweep is what ends it.
+          if (!cancelled) onSettled?.({ kind: 'threw', error });
+          return;
+        }
         if (cancelled) return;
-        if (result.kind === 'skipped') return;
-        if (isTerminalGenerationJobState(result.applied.record.lifecycle.state)) return;
+        if (result.kind === 'skipped' || isTerminalGenerationJobState(result.applied.record.lifecycle.state)) {
+          onSettled?.({ kind: 'settled' });
+          return;
+        }
         arm(nextPollDelayMs(result.applied.record.unreachableStreak));
       })();
     });
