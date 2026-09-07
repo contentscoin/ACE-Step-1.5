@@ -3,9 +3,9 @@
  *
  * `dsp/src/musicstudio_dsp/sidecar.py` exposes every Celery task as `POST /tasks/<name>` with
  * the task's keyword arguments as a JSON object and its result dict as the response. This is the
- * caller. It speaks to exactly one task for now — `normalise_for_storage`, the one the
- * publication path needs — and adding a second is a method that names a task and decodes a dict,
- * not a change to how the wire works.
+ * caller. It speaks to three of the eleven tasks — `normalise_for_storage` for the publication
+ * path (S3), and `convert_for_download` and `waveform` for the read paths (S6) — and adding a
+ * fourth is a method that names a task and decodes a dict, not a change to how the wire works.
  *
  * ### Shaped like `createAceHttpTransport`, for the same reasons
  *
@@ -30,6 +30,9 @@
  * this is what the store *holds*, and conflating them would let a download format name a
  * stored object that cannot exist.
  */
+import { isDownloadFormat, type DownloadFormat } from '../../../domain/library/download';
+import type { WaveformBucket } from '../../../domain/playback/waveform';
+
 export type StoredAudioFormat = 'flac' | 'wav';
 
 const STORED_AUDIO_FORMATS: readonly StoredAudioFormat[] = ['flac', 'wav'];
@@ -53,19 +56,70 @@ export interface NormalisedAudio {
   readonly watermarkVersion: number;
 }
 
-/** The DSP operations the generation path needs. Narrow on purpose; see the header. */
+/** What `convert_for_download` reports (Requirements 13.3, 13.7, 13.10). */
+export interface ConvertedAudio {
+  readonly bytes: Uint8Array;
+  readonly format: DownloadFormat;
+  /** Requirement 13.10 — always 48 kHz, reported rather than assumed. */
+  readonly sampleRate: number;
+  readonly channels: number;
+  readonly durationMs: number;
+  readonly lossless: boolean;
+  readonly lengthErrorMs: number;
+  /**
+   * Requirement 13.7's tags, **read back out of the encoded bytes** by the worker.
+   *
+   * Not an echo of the request: the caller compares these with what it asked for, and an
+   * echo would compare a value with itself. See `convert_for_download_task`'s docstring.
+   */
+  readonly tags: Readonly<Record<string, string>>;
+}
+
+/** What `waveform` reports (Requirement 12.7). Two parallel arrays on the wire; pairs here. */
+export interface ComputedWaveform {
+  readonly buckets: readonly WaveformBucket[];
+  readonly durationMs: number;
+  readonly channels: number;
+  readonly sampleRate: number;
+}
+
+/**
+ * The DSP the *publication* path needs (S3). One method, and it stays one method.
+ *
+ * The read paths of S6 need two more tasks, and they are separate interfaces below rather
+ * than three methods here. A publication test double has no conversion to script and no
+ * waveform to return; widening this would make every one of them implement two methods it
+ * never calls, which is how a double starts lying about what it stands in for.
+ */
 export interface DspClient {
   normaliseForStorage(audio: Uint8Array): Promise<NormalisedAudio>;
 }
 
+/** The DSP the download path needs (Requirement 13.3). */
+export interface DspConversionClient {
+  /** `tags` is what should be written; the result says what actually was. */
+  convertForDownload(
+    audio: Uint8Array,
+    format: DownloadFormat,
+    tags: Readonly<Record<string, string>>,
+  ): Promise<ConvertedAudio>;
+}
+
+/** The DSP the waveform path needs (Requirement 12.7). */
+export interface DspWaveformClient {
+  /** `buckets` is already resolved against the asset's frame count by the caller. */
+  waveform(audio: Uint8Array, buckets: number): Promise<ComputedWaveform>;
+}
+
 /**
- * The HTTP client, which can also ask the sidecar whether it is there.
+ * One client that satisfies all three narrow interfaces, and can say whether it is there.
  *
- * `health` is not on `DspClient`: the generation path never needs it, and a port that carried
- * it would make every scripted double implement a probe. The composition root's readiness
- * check is the only caller, and it holds this wider type.
+ * The composition root opens this once and hands each caller the interface it declared —
+ * the same arrangement `RedisConnection` has with the account and credit stores. `health` is
+ * on none of them: the product never needs it, and a port that carried it would make every
+ * scripted double implement a probe. The readiness check is its only caller.
  */
-export interface DspHttpClient extends DspClient {
+export interface DspHttpClient extends DspClient, DspConversionClient, DspWaveformClient {
   /** `GET /health` — the task names the sidecar dispatches. Rejects when it is unreachable. */
   health(): Promise<readonly string[]>;
 }
@@ -91,6 +145,8 @@ export class DspTaskFailed extends Error {
 }
 
 const NORMALISE_TASK = 'musicstudio_dsp.normalise_for_storage';
+const CONVERT_TASK = 'musicstudio_dsp.convert_for_download';
+const WAVEFORM_TASK = 'musicstudio_dsp.waveform';
 
 /** The sidecar's error envelope: `{ error: { code, message } }`. */
 interface SidecarError {
@@ -121,6 +177,48 @@ function readStoredFormat(value: unknown): StoredAudioFormat {
 function readBoolean(value: unknown, field: string): boolean {
   if (typeof value !== 'boolean') throw new TypeError(`dsp response: ${field} is not a boolean`);
   return value;
+}
+
+function readDownloadFormat(value: unknown): DownloadFormat {
+  const text = readString(value, 'audio_format');
+  if (!isDownloadFormat(text)) {
+    throw new TypeError(`dsp response: audio_format ${JSON.stringify(text)} is not a download format`);
+  }
+  return text;
+}
+
+/**
+ * The tag map, checked to be strings both ways.
+ *
+ * A number or a null arriving here would compare unequal to the requested tag and be reported
+ * as a missing marker, which is the right outcome but the wrong reason; rejecting the shape
+ * says what actually went wrong.
+ */
+function readTags(value: unknown): Readonly<Record<string, string>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('dsp response: tags is not an object');
+  }
+  const tags: Record<string, string> = {};
+  for (const [field, tagValue] of Object.entries(value)) {
+    tags[field] = readString(tagValue, `tags.${field}`);
+  }
+  return tags;
+}
+
+/** The wire's two parallel arrays, zipped into the domain's pairs. */
+function readBuckets(result: Record<string, unknown>): readonly WaveformBucket[] {
+  const mins = result.min;
+  const maxes = result.max;
+  if (!Array.isArray(mins) || !Array.isArray(maxes)) {
+    throw new TypeError('dsp response: min/max are not arrays');
+  }
+  if (mins.length !== maxes.length) {
+    throw new TypeError('dsp response: min and max have different lengths');
+  }
+  return mins.map((min, index) => ({
+    min: readNumber(min, `min[${String(index)}]`),
+    max: readNumber(maxes[index], `max[${String(index)}]`),
+  }));
 }
 
 export function createDspHttpClient(config: DspHttpClientConfig): DspHttpClient {
@@ -176,6 +274,37 @@ export function createDspHttpClient(config: DspHttpClientConfig): DspHttpClient 
         lengthErrorMs: readNumber(result.length_error_ms, 'length_error_ms'),
         resampled: readBoolean(result.resampled, 'resampled'),
         watermarkVersion: readNumber(result.watermark_version, 'watermark_version'),
+      };
+    },
+
+    async convertForDownload(audio, format, tags) {
+      const result = await call(CONVERT_TASK, {
+        audio_base64: Buffer.from(audio).toString('base64'),
+        audio_format: format,
+        tags,
+      });
+      return {
+        bytes: new Uint8Array(Buffer.from(readString(result.audio_base64, 'audio_base64'), 'base64')),
+        format: readDownloadFormat(result.audio_format),
+        sampleRate: readNumber(result.sample_rate, 'sample_rate'),
+        channels: readNumber(result.channels, 'channels'),
+        durationMs: readNumber(result.duration_ms, 'duration_ms'),
+        lossless: readBoolean(result.lossless, 'lossless'),
+        lengthErrorMs: readNumber(result.length_error_ms, 'length_error_ms'),
+        tags: readTags(result.tags),
+      };
+    },
+
+    async waveform(audio, buckets) {
+      const result = await call(WAVEFORM_TASK, {
+        audio_base64: Buffer.from(audio).toString('base64'),
+        buckets,
+      });
+      return {
+        buckets: readBuckets(result),
+        durationMs: readNumber(result.duration_ms, 'duration_ms'),
+        channels: readNumber(result.channels, 'channels'),
+        sampleRate: readNumber(result.sample_rate, 'sample_rate'),
       };
     },
   };

@@ -84,6 +84,17 @@ describe('the download tag (Req 13.7)', () => {
     expect(AI_GENERATED_TAG_VALUE).toMatch(/AI/);
     expect(AI_GENERATED_TAG_VALUE.length).toBeGreaterThan(20);
   });
+
+  it('is ASCII, because mp3 cannot carry anything else readably', () => {
+    // Measured, not assumed: libsndfile writes the ID3v2 `COMM` frame declaring ISO-8859-1
+    // and stores UTF-8 bytes in it, so a non-ASCII marker reaches a player as mojibake and
+    // may be cut mid-character. Requirement 13.2 offers mp3 for every Asset_Kind and 13.7
+    // admits no format where the marker may be unreadable, so the marker is ASCII.
+    //
+    // `dsp/test/test_formats.py::test_mp3_cannot_carry_a_non_ascii_tag` pins the defect on
+    // the other side. If that test ever fails, this constraint can be lifted.
+    expect(AI_GENERATED_TAG_VALUE).toMatch(/^[\x20-\x7e]+$/);
+  });
 });
 
 describe('the watermark identifier (Req 33.14)', () => {

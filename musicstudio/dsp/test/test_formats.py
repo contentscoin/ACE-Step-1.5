@@ -249,6 +249,33 @@ class TestMetadataTags:
 
         assert read_tags(encode(signal(frames=4_800), audio_format, tags)) == tags
 
+    @pytest.mark.parametrize("audio_format", ["wav", "flac", "ogg"])
+    def test_non_ascii_survives_every_format_but_mp3(self, audio_format: str) -> None:
+        # The three containers whose tag encoding libsndfile gets right.
+        marker = "AI 생성 — em dash and 한글"
+
+        encoded = encode(signal(frames=4_800), audio_format, {"comment": marker})
+
+        assert read_tags(encoded)["comment"] == marker
+
+    def test_mp3_cannot_carry_a_non_ascii_tag(self) -> None:
+        # Discovered by running a download through the real encoder (slice S6), and pinned
+        # here because it is the reason `AI_GENERATED_TAG_VALUE` is ASCII.
+        #
+        # libsndfile writes the ID3v2 ``COMM`` frame with its encoding byte set to 0 —
+        # ISO-8859-1 — and then stores the UTF-8 bytes it was handed unchanged. The file is
+        # wrong by ID3, not merely awkward: a conforming player decodes those bytes as
+        # Latin-1 and shows mojibake, and the declared frame length can cut a multi-byte
+        # character in half. So a marker that must be readable cannot be non-ASCII in mp3.
+        #
+        # This test asserts the *defect*, so the day libsndfile learns to write UTF-8 ID3
+        # this fails and says the constraint can be lifted.
+        marker = "AI 생성 — em dash and 한글"
+
+        encoded = encode(signal(frames=4_800), "mp3", {"comment": marker})
+
+        assert read_tags(encoded).get("comment") != marker
+
     def test_an_untagged_file_reports_no_tags(self) -> None:
         assert read_tags(encode(signal(frames=4_800), "flac")) == {}
 

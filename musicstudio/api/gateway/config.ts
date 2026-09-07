@@ -5,6 +5,7 @@ import {
   type DailyQuota,
   type ExecutionLocation,
 } from '../../adapters/registry/engine-descriptor';
+import { FREE_PLAN_ID, findPlan, planIds } from '../../domain/credit/plan';
 import { MINIMUM_JWT_SECRET_LENGTH } from '../../services/account/jwt';
 import { MINIMUM_PASSWORD_HASH_COST } from '../../services/account/password-hasher';
 
@@ -59,6 +60,15 @@ export interface GatewayConfig {
   readonly objectStoreDirectory: string;
   /** Apply pending migrations before listening. Off by default: a deploy decides when the schema moves. */
   readonly migrateOnStart: boolean;
+  /**
+   * The plan every account is on (Requirement 13.4), until billing exists.
+   *
+   * `free` by default, which is the plan an account with no billing relationship is actually
+   * on — and which refuses lossless downloads, exactly as 13.4 says. A single-tenant
+   * deployment with no billing sets this to `creator` or `studio`; that is an operator's
+   * decision, not the code's. See `services/library/adapters/configured-plan.ts`.
+   */
+  readonly defaultPlanId: string;
   readonly engine: EngineConfig;
   readonly google: SocialProviderCredentials | null;
   readonly apple: SocialProviderCredentials | null;
@@ -84,6 +94,7 @@ export function loadGatewayConfig(env: Environment = process.env): GatewayConfig
     objectStoreDirectory:
       readNonEmpty(env.MUSICSTUDIO_OBJECT_STORE_DIR) ?? DEFAULT_OBJECT_STORE_DIRECTORY,
     migrateOnStart: readFlag(env, 'MUSICSTUDIO_MIGRATE_ON_START'),
+    defaultPlanId: readPlanId(env.MUSICSTUDIO_DEFAULT_PLAN_ID),
     engine: {
       baseUrl: readNonEmpty(env.MUSICSTUDIO_ENGINE_URL) ?? DEFAULT_ENGINE_URL,
       apiToken: readNonEmpty(env.MUSICSTUDIO_ENGINE_API_TOKEN) ?? null,
@@ -156,6 +167,17 @@ function readPort(value: string | undefined): number {
     throw new Error('MUSICSTUDIO_PORT must be an integer between 1 and 65535.');
   }
   return port;
+}
+
+/** Rejected at boot rather than at the first download, where it would look like a 402. */
+function readPlanId(value: string | undefined): string {
+  const planId = readNonEmpty(value) ?? FREE_PLAN_ID;
+  if (findPlan(planId) === undefined) {
+    throw new Error(
+      `MUSICSTUDIO_DEFAULT_PLAN_ID must be one of ${planIds().join(', ')} (Requirement 13.4).`,
+    );
+  }
+  return planId;
 }
 
 function readExecutionLocation(value: string | undefined): ExecutionLocation {

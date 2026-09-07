@@ -10,7 +10,7 @@ import { loadGatewayConfig } from '../../api/gateway/config';
 import { ACE_STEP_ENGINE_ID } from '../../adapters/registry/default-engines';
 import { applyMigrations, loadMigrations, type SqlExecutor } from '../../db/runner';
 import { watermarkId } from '../../domain/disclosure/ai-disclosure';
-import type { DspClient } from '../../services/generation/adapters/dsp-http-client';
+import type { ComposedDsp } from '../../api/gateway/composition';
 import { objectKeyFor } from '../../services/generation/adapters/pg-asset-publication';
 import type { JobStatusView } from '../../services/generation/job-status';
 import { createFilesystemObjectStore } from '../../services/playback/adapters/filesystem-object-store';
@@ -49,11 +49,41 @@ const describeComposed = databaseUrl === undefined || redisUrl === undefined ? d
 const CREDENTIALS = { email: 'composer@studio.test', password: 'correct-horse-battery-staple' };
 const ENGINE_FILE = '/outputs/ace-task-7.wav';
 
-/** A DSP that returns FLAC-looking bytes and reports the watermark scheme it "applied". */
-function scriptedDsp(): DspClient {
+/** The magic every container this test asks for begins with. */
+const CONTAINER_MAGIC: Readonly<Record<string, readonly number[]>> = {
+  wav: [0x52, 0x49, 0x46, 0x46], // RIFF
+  flac: [0x66, 0x4c, 0x61, 0x43], // fLaC
+  ogg: [0x4f, 0x67, 0x67, 0x53], // OggS
+  mp3: [0xff, 0xfb], // MPEG frame sync
+};
+
+/**
+ * Whether `bytes` really is an mp3.
+ *
+ * Two openings are legitimate and which one appears depends on the tags: a file that carries
+ * an ID3v2 header — which every download does, because Requirement 13.7 puts a marker in it —
+ * begins with `ID3`, and the first MPEG frame comes after it. A bare stream begins with the
+ * frame sync. Asserting only the sync would fail on exactly the files the requirement asks for.
+ */
+function isMp3(bytes: Buffer): boolean {
+  if (bytes.subarray(0, 3).toString('ascii') === 'ID3') return true;
+  return bytes[0] === 0xff && (bytes[1] ?? 0) >= 0xe0;
+}
+
+/**
+ * A DSP that stands in for the worker on a machine with no sidecar.
+ *
+ * It satisfies all three interfaces the composition uses, because the composition uses all
+ * three. The bytes it returns carry the right container magic so the assertions below are the
+ * same ones in both modes; what it cannot stand in for is Requirement 13.7's evidence — a
+ * double that reports the tags it was handed is agreeing with itself. That check is real only
+ * against the sidecar, which is why CI runs it (`MUSICSTUDIO_DSP_URL`) and why
+ * `dsp/test/test_worker.py` pins the read-back on the worker's own side.
+ */
+function scriptedDsp(): ComposedDsp {
   return {
     normaliseForStorage: async () => ({
-      bytes: new Uint8Array([0x66, 0x4c, 0x61, 0x43, ...Array.from({ length: 96 }, (_x, i) => i % 251)]),
+      bytes: new Uint8Array([...(CONTAINER_MAGIC.flac ?? []), ...Array.from({ length: 96 }, (_x, i) => i % 251)]),
       audioFormat: 'flac',
       durationMs: 1_000,
       sampleRate: 48_000,
@@ -63,6 +93,25 @@ function scriptedDsp(): DspClient {
       lengthErrorMs: 0,
       resampled: true,
       watermarkVersion: 1,
+    }),
+    convertForDownload: async (_audio, format, tags) => ({
+      bytes: new Uint8Array([...(CONTAINER_MAGIC[format] ?? []), ...Array.from({ length: 64 }, (_x, i) => i)]),
+      format,
+      sampleRate: 48_000,
+      channels: 2,
+      durationMs: 1_000,
+      lossless: format === 'wav' || format === 'flac',
+      lengthErrorMs: 0,
+      tags,
+    }),
+    waveform: async (_audio, buckets) => ({
+      buckets: Array.from({ length: buckets }, (_x, index) => ({
+        min: -((index % 10) / 10),
+        max: (index % 10) / 10,
+      })),
+      durationMs: 1_000,
+      channels: 2,
+      sampleRate: 48_000,
     }),
   };
 }
@@ -74,6 +123,8 @@ describeComposed('the composition root against PostgreSQL, Redis and a scripted 
   let transport: ScriptedAceTransport;
   let scheduler: ManualScheduler;
   const logged: Record<string, unknown>[] = [];
+  /** Set by the generation case; the S6 cases read the asset it produced. */
+  let generated = { assetId: '', accessToken: '' };
 
   beforeAll(async () => {
     await client.connect();
@@ -94,6 +145,11 @@ describeComposed('the composition root against PostgreSQL, Redis and a scripted 
       MUSICSTUDIO_DATABASE_URL: databaseUrl,
       MUSICSTUDIO_OBJECT_STORE_DIR: root,
       ...(dspUrl === undefined ? {} : { MUSICSTUDIO_DSP_URL: dspUrl }),
+      // Requirement 13.4 gates lossless downloads on the plan, and the deployment names the
+      // plan (there is no billing). `creator` is what a single-tenant install would set, and
+      // it is what makes the wav download below reachable; the free-plan refusal is its own
+      // case, on its own gateway, because the port answers one plan for every account.
+      MUSICSTUDIO_DEFAULT_PLAN_ID: 'creator',
       // The engine URL is never contacted — the transport is scripted — but it is what a
       // deployment would set, and the config must accept it.
       MUSICSTUDIO_ENGINE_URL: 'http://127.0.0.1:8001',
@@ -121,6 +177,14 @@ describeComposed('the composition root against PostgreSQL, Redis and a scripted 
       url,
       payload,
       ...(accessToken === undefined ? {} : { headers: { authorization: `Bearer ${accessToken}` } }),
+    });
+  }
+
+  async function get(url: string, accessToken: string) {
+    return gateway.app.inject({
+      method: 'GET',
+      url,
+      headers: { authorization: `Bearer ${accessToken}` },
     });
   }
 
@@ -240,6 +304,229 @@ describeComposed('the composition root against PostgreSQL, Redis and a scripted 
     // The engine was asked for exactly the file it named, and nothing was charged (v0).
     expect(transport.binaryRequests.map((request) => request.query.path)).toEqual([ENGINE_FILE]);
     expect(logged.some((record) => record.event === 'gateway.composed')).toBe(true);
+
+    generated = { assetId: assetId ?? '', accessToken };
+  });
+
+  it('lists, streams and downloads the asset that was just generated', async () => {
+    // This is S6's acceptance: the asset a job produced is reachable over HTTP. Before this
+    // slice the gateway mounted no library, playback or download routes at all, so everything
+    // the previous case stored was invisible to every client.
+    const { assetId, accessToken } = generated;
+    expect(assetId).not.toBe('');
+
+    // Requirement 11.1 — the owner's listing, newest first, with the asset it just made.
+    const listed = await get('/v1/library/assets', accessToken);
+    expect(listed.statusCode).toBe(200);
+    const page = listed.json<{ assets: { id: string; name: string; playCount: number }[] }>();
+    expect(page.assets.map((asset) => asset.id)).toContain(assetId);
+    const before = page.assets.find((asset) => asset.id === assetId);
+    expect(before?.playCount).toBe(0);
+
+    // Requirement 12.1 — the whole object, as audio, with the play count Requirement 12.4 kept.
+    const streamed = await gateway.app.inject({
+      method: 'GET',
+      url: `/v1/playback/assets/${assetId}/stream`,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(streamed.statusCode).toBe(200);
+    expect(streamed.headers['content-type']).toBe('audio/flac');
+    expect(streamed.headers['accept-ranges']).toBe('bytes');
+    expect(streamed.headers['x-play-count']).toBe('1');
+    expect(streamed.rawPayload.length).toBeGreaterThan(0);
+
+    // Requirement 12.2, 12.3 — a seek asks the store for that window and answers 206, and
+    // Requirement 12.4's counter does not move for it.
+    const ranged = await gateway.app.inject({
+      method: 'GET',
+      url: `/v1/playback/assets/${assetId}/stream`,
+      headers: { authorization: `Bearer ${accessToken}`, range: 'bytes=2-5' },
+    });
+    expect(ranged.statusCode).toBe(206);
+    expect(ranged.headers['content-range']).toMatch(/^bytes 2-5\//);
+    expect(ranged.rawPayload).toHaveLength(4);
+    expect(ranged.headers['x-play-count']).toBeUndefined();
+
+    // Requirement 12.6 — an anonymous caller is refused, because nothing is public in this
+    // deployment (no sharing store is composed; see `ownerOnlyVisibility`). The status is 404
+    // and not 403 on purpose: `playback/errors.ts` argues that a stream URL is reachable
+    // without a session, so a 403 would confirm the asset exists. The code tells them apart.
+    const anonymous = await gateway.app.inject({
+      method: 'GET',
+      url: `/v1/playback/assets/${assetId}/stream`,
+    });
+    expect(anonymous.statusCode).toBe(404);
+    expect(anonymous.json<{ error: { code: string } }>().error.code).toBe('playback_asset_private');
+
+    // Requirement 12.7 — the waveform, at the resolution asked for.
+    const waveform = await get(`/v1/playback/assets/${assetId}/waveform?buckets=32`, accessToken);
+    expect(waveform.statusCode).toBe(200);
+    const drawing = waveform.json<{ buckets: { min: number; max: number }[]; durationMs: number }>();
+    expect(drawing.buckets).toHaveLength(32);
+    expect(drawing.buckets.every((bucket) => bucket.min <= bucket.max)).toBe(true);
+
+    // Requirements 13.2, 13.8 — what this kind may be downloaded as, before asking for it.
+    const formats = await get(`/v1/library/assets/${assetId}/download/formats`, accessToken);
+    expect(formats.statusCode).toBe(200);
+    expect(formats.json<{ formats: string[] }>().formats).toEqual(['mp3', 'wav', 'flac']);
+
+    // Requirements 13.1, 13.3, 13.6, 13.7, 13.10 — the file itself. This is the sentence the
+    // roadmap's S6 row is written around: a download that is real audio.
+    const downloaded = await get(
+      `/v1/library/assets/${assetId}/download?format=wav`,
+      accessToken,
+    );
+    expect(downloaded.statusCode).toBe(200);
+    expect(downloaded.headers['content-type']).toBe('audio/wav');
+    expect(downloaded.headers['x-sample-rate']).toBe('48000');
+    // Requirement 33.19: exactly one of two values, on every download.
+    expect(downloaded.headers['x-usage-purpose']).toBe('non_commercial');
+    // Requirement 13.6's name — `downloadFileName` builds `<title> (<id>).<ext>` — in both
+    // forms of the header, so a client that reads either gets the same file name.
+    const disposition = String(downloaded.headers['content-disposition']);
+    expect(disposition).toContain(`(${assetId}).wav`);
+    expect(disposition).toContain(`filename*=UTF-8''`);
+    // RIFF/WAVE. With the real sidecar these are the bytes an encoder produced; with the
+    // scripted one they are the container magic it was written to return.
+    expect([...downloaded.rawPayload.subarray(0, 4)]).toEqual(CONTAINER_MAGIC.wav);
+    if (dspUrl !== undefined) {
+      expect(downloaded.rawPayload.subarray(8, 12).toString('ascii')).toBe('WAVE');
+    }
+
+    // Requirement 11.5 — the rename a user does after hearing it.
+    const renamed = await gateway.app.inject({
+      method: 'PATCH',
+      url: `/v1/library/assets/${assetId}`,
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { name: 'Rain, Later' },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json<{ name: string }>().name).toBe('Rain, Later');
+
+    // Requirement 11.6 / 11.7 — a deleted asset leaves the listing, and 11.11 brings it back.
+    expect(
+      (
+        await gateway.app.inject({
+          method: 'DELETE',
+          url: `/v1/library/assets/${assetId}`,
+          headers: { authorization: `Bearer ${accessToken}` },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const afterDelete = await get('/v1/library/assets', accessToken);
+    expect(afterDelete.json<{ assets: { id: string }[] }>().assets.map((a) => a.id)).not.toContain(
+      assetId,
+    );
+    expect(
+      (
+        await gateway.app.inject({
+          method: 'POST',
+          url: `/v1/library/assets/${assetId}/restore`,
+          headers: { authorization: `Bearer ${accessToken}` },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const afterRestore = await get('/v1/library/assets', accessToken);
+    expect(afterRestore.json<{ assets: { id: string }[] }>().assets.map((a) => a.id)).toContain(
+      assetId,
+    );
+  });
+
+  it('keeps a playlist in PostgreSQL, in the order it was given and then reordered', async () => {
+    // Requirement 11.10. Two tables and one transaction — see `pg-playlist-store.ts`.
+    const { assetId, accessToken } = generated;
+
+    const created = await gateway.app.inject({
+      method: 'POST',
+      url: '/v1/library/playlists',
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { name: 'Late night', assetIds: [assetId, assetId] },
+    });
+    expect(created.statusCode).toBe(201);
+    const playlist = created.json<{ id: string; assetIds: string[] }>();
+    // `playlist_item_unique_asset`: an asset appears once, at its first position.
+    expect(playlist.assetIds).toEqual([assetId]);
+
+    const listed = await get('/v1/library/playlists', accessToken);
+    expect(listed.json<{ playlists: { id: string }[] }>().playlists.map((p) => p.id)).toEqual([
+      playlist.id,
+    ]);
+
+    // A reorder replaces the item set rather than appending to it.
+    const reordered = await gateway.app.inject({
+      method: 'PUT',
+      url: `/v1/library/playlists/${playlist.id}/assets`,
+      headers: { authorization: `Bearer ${accessToken}` },
+      payload: { assetIds: [assetId] },
+    });
+    expect(reordered.statusCode).toBe(200);
+    expect(reordered.json<{ assetIds: string[] }>().assetIds).toEqual([assetId]);
+
+    // The rows are really there, in position order.
+    const { rows } = await client.query<{ asset_id: string; position: number }>(
+      'SELECT asset_id, position FROM playlist_item WHERE playlist_id = $1 ORDER BY position',
+      [playlist.id],
+    );
+    expect(rows).toEqual([{ asset_id: assetId, position: 0 }]);
+
+    expect(
+      (
+        await gateway.app.inject({
+          method: 'DELETE',
+          url: `/v1/library/playlists/${playlist.id}`,
+          headers: { authorization: `Bearer ${accessToken}` },
+        })
+      ).statusCode,
+    ).toBe(204);
+  });
+
+  it('refuses a lossless download on the free plan, and names the plans that allow it', async () => {
+    // Requirement 13.4, on a gateway configured the way an install with no billing starts.
+    // A second composition, because the v0 plan port answers one plan for every account —
+    // which is exactly what `configured-plan.ts` says it does.
+    const freeGateway = composeGateway(
+      loadGatewayConfig({
+        MUSICSTUDIO_JWT_SECRET: 'composition-test-secret-of-at-least-32-chars',
+        MUSICSTUDIO_PUBLIC_BASE_URL: 'https://studio.test',
+        MUSICSTUDIO_REDIS_URL: redisUrl,
+        MUSICSTUDIO_DATABASE_URL: databaseUrl,
+        MUSICSTUDIO_OBJECT_STORE_DIR: root,
+        ...(dspUrl === undefined ? {} : { MUSICSTUDIO_DSP_URL: dspUrl }),
+      }),
+      {
+        aceTransport: createScriptedAceTransport(),
+        scheduler: createManualScheduler(),
+        requestLogging: false,
+        log: () => {},
+        ...(dspUrl === undefined ? { dsp: scriptedDsp() } : {}),
+      },
+    );
+    try {
+      const { assetId, accessToken } = generated;
+
+      const refused = await freeGateway.app.inject({
+        method: 'GET',
+        url: `/v1/library/assets/${assetId}/download?format=wav`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(refused.statusCode).toBe(402);
+      const error = refused.json<{ error: { refusal: string; requiredPlanIds: string[] } }>().error;
+      expect(error.refusal).toBe('download_lossless_not_entitled');
+      expect(error.requiredPlanIds).toEqual(['creator', 'studio']);
+
+      // The lossy format the free plan does carry still works, so this is a plan gate and not
+      // a broken download path.
+      const allowed = await freeGateway.app.inject({
+        method: 'GET',
+        url: `/v1/library/assets/${assetId}/download?format=mp3`,
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+      expect(allowed.statusCode).toBe(200);
+      expect(allowed.headers['content-type']).toBe('audio/mpeg');
+      expect(isMp3(allowed.rawPayload)).toBe(true);
+    } finally {
+      await freeGateway.close();
+    }
   });
 
   it('refuses a request nobody is signed in for, and a song outside Requirement 4.2', async () => {

@@ -148,12 +148,36 @@ class TestConvertForDownloadTask:
         assert result["sample_rate"] == INTERNAL_SAMPLE_RATE
         assert base64.b64decode(result["audio_base64"])
 
+    @pytest.mark.parametrize("audio_format", ["mp3", "wav", "flac", "ogg"])
+    def test_reports_the_tags_it_actually_wrote(self, audio_format: str) -> None:
+        # Requirement 13.7. The product layer refuses a download whose marker did not
+        # survive the encode, and it can only do that if the task reports what the file
+        # carries rather than echoing the request — see the task's docstring. All four
+        # containers must be able to carry it; a container that cannot is a download that
+        # would go out unmarked.
+        payload = base64.b64encode(wav_bytes(frames=4_410)).decode("ascii")
+
+        result = convert_for_download_task.run(
+            payload, audio_format, {"comment": "AI-generated"}
+        )
+
+        assert result["tags"]["comment"] == "AI-generated"
+
+    def test_reports_no_tag_when_none_was_asked_for(self) -> None:
+        # The absence has to be visible too: a task that invented a tag would make the
+        # product layer's check pass for a file that carries nothing.
+        payload = base64.b64encode(wav_bytes(frames=4_410)).decode("ascii")
+
+        result = convert_for_download_task.run(payload, "flac")
+
+        assert result["tags"] == {}
+
     def test_result_is_json_serialisable(self) -> None:
         import json
 
         payload = base64.b64encode(wav_bytes(frames=4_410)).decode("ascii")
 
-        json.dumps(convert_for_download_task.run(payload, "flac"))
+        json.dumps(convert_for_download_task.run(payload, "flac", {"comment": "AI-generated"}))
 
 
 
