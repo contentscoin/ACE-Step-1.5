@@ -1,0 +1,93 @@
+# The whole product layer, running (roadmap §4.4, slice S6).
+#
+#     MUSICSTUDIO_JWT_SECRET=$(openssl rand -hex 32) docker compose up --build
+#     ./scripts/e2e.sh
+#
+# Four services here and one deliberately outside: ACE-Step needs a GPU, so it runs on the
+# host (`./run_api_server.sh` from the repository root) and the gateway reaches it through
+# `host.docker.internal`. A compose file that pretended to start it would either fail on every
+# machine without a card or quietly start something that cannot generate.
+#
+# The gateway is `degraded` rather than `unavailable` while the engine is absent — `/ready`
+# says so, and everything that does not need the engine still works. That is the point of the
+# distinction: you can bring this up, register, and browse an empty library before you have a
+# GPU anywhere near it.
+
+name: musicstudio
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${MUSICSTUDIO_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: musicstudio
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      # Exposed so `psql` and the gated test suites can reach it from the host.
+      - '${MUSICSTUDIO_POSTGRES_PORT:-5432}:5432'
+    healthcheck:
+      # `-U postgres -d musicstudio`, not a bare `pg_isready`: the server accepts connections
+      # on the postgres database moments before the initdb script has created this one, and
+      # the gateway's first query is against this one.
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d musicstudio']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    ports:
+      - '${MUSICSTUDIO_REDIS_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  dsp:
+    build:
+      context: ./dsp
+    ports:
+      # Exposed so `npm run test:db` on the host can run the sidecar round-trip against it.
+      - '${MUSICSTUDIO_DSP_PORT:-8002}:8002'
+
+  gateway:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      dsp:
+        condition: service_healthy
+    environment:
+      # Required. No default for the signing key on purpose: a compose file that invented one
+      # would be a compose file whose tokens anyone can forge.
+      MUSICSTUDIO_JWT_SECRET: ${MUSICSTUDIO_JWT_SECRET:?set MUSICSTUDIO_JWT_SECRET, e.g. $(openssl rand -hex 32)}
+      MUSICSTUDIO_PUBLIC_BASE_URL: ${MUSICSTUDIO_PUBLIC_BASE_URL:-http://localhost:8080}
+      MUSICSTUDIO_DATABASE_URL: postgresql://postgres:${MUSICSTUDIO_POSTGRES_PASSWORD:-postgres}@postgres:5432/musicstudio
+      MUSICSTUDIO_REDIS_URL: redis://redis:6379
+      MUSICSTUDIO_DSP_URL: http://dsp:8002
+      # The engine is on the host. `host-gateway` below is what makes this name resolve on
+      # Linux, where Docker does not provide it by default.
+      MUSICSTUDIO_ENGINE_URL: ${MUSICSTUDIO_ENGINE_URL:-http://host.docker.internal:8001}
+      # Requirement 13.4 gates lossless downloads on the plan and this install has no billing,
+      # so the operator names the plan. `creator`, because a single-tenant deployment has no
+      # one to withhold wav and flac from; set `free` to see the 402 the rule produces.
+      MUSICSTUDIO_DEFAULT_PLAN_ID: ${MUSICSTUDIO_DEFAULT_PLAN_ID:-creator}
+      # Convenient here, deliberately off by default elsewhere: a compose stack is brought up
+      # from nothing often enough that applying the schema by hand each time is friction.
+      MUSICSTUDIO_MIGRATE_ON_START: 'true'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '${MUSICSTUDIO_PORT:-8080}:8080'
+    volumes:
+      - object-store:/data/objects
+
+volumes:
+  postgres-data:
+  object-store:

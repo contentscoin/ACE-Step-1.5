@@ -92,7 +92,29 @@ Both run in `.github/workflows/musicstudio-ci.yml`, which is path-filtered to
 - `dsp/pyproject.toml` — DSP worker deps, resolved separately from the engine's PyTorch/CUDA stack.
 - The repository root `package.json` (VitePress docs) and `pyproject.toml` (ACE-Step engine) are **never modified**.
 
-## Running the gateway (slice S5)
+## Running the whole thing (slice S6)
+
+Everything except the engine, in containers:
+
+```bash
+export MUSICSTUDIO_JWT_SECRET=$(openssl rand -hex 32)
+docker compose up --build -d          # PostgreSQL, Redis, the DSP sidecar, the gateway
+(cd .. && ./run_api_server.sh)        # ACE-Step, on the host — it needs a GPU
+./scripts/e2e.sh                      # register → generate → stream → download real audio
+```
+
+ACE-Step is deliberately outside the compose file: it needs a GPU, so it runs on the host and
+the gateway reaches it at `host.docker.internal:8001`. Without it the stack still comes up and
+`/ready` answers `degraded` — everything that does not need the engine works, which is what
+makes it worth starting before you have a card.
+
+`scripts/e2e.sh` is the acceptance walkthrough, over sockets rather than through
+`app.inject()`: it registers an account, asks for a song, watches the gateway poll it to
+completion, lists it, streams it (checking the 206 a seek produces), downloads it, and verifies
+the first bytes really are the container it asked for. It exits non-zero on the first thing
+that is not true and says which.
+
+## Running the gateway directly (slice S5)
 
 `api/gateway/main.ts` is the composition root: PostgreSQL for accounts and assets, Redis
 for sessions, the ACE-Step adapter over HTTP, the DSP sidecar over HTTP and a filesystem
@@ -122,11 +144,17 @@ store is down — an unreachable engine or sidecar is `degraded`, and the health
 probing. Optional settings: `MUSICSTUDIO_ENGINE_API_TOKEN`, `MUSICSTUDIO_ENGINE_EXECUTION_LOCATION`
 (`local`|`remote`), `MUSICSTUDIO_ENGINE_WEIGHT_LICENSE_ID` (recorded on every asset,
 Requirement 33.7), `MUSICSTUDIO_ENGINE_DAILY_MAX_REQUESTS` / `_GPU_SECONDS`,
-`MUSICSTUDIO_OBJECT_STORE_DIR` (default `data/objects`).
+`MUSICSTUDIO_OBJECT_STORE_DIR` (default `data/objects`), `MUSICSTUDIO_DEFAULT_PLAN_ID`.
 
-What is still v0 in this composition is named in `api/gateway/composition.ts`: the job
-store, queue and event bus are in-memory (a restart forgets in-flight jobs), no credits
-are charged, and no moderation service is composed. `docs/ROADMAP.md` §4.4 tracks each.
+That last one is Requirement 13.4: lossless downloads (wav, flac) are gated on the requester's
+plan, and this install has no billing, so the deployment names one plan for every account. It
+defaults to `free`, which refuses them with a 402 naming the plans that would allow it — set
+`creator` or `studio` on a single-tenant install.
+
+What is still v0 in this composition is named in `api/gateway/composition.ts`: the job store,
+queue and event bus are in-memory (a restart forgets in-flight jobs), no credits are charged,
+no moderation service is composed, nothing is publicly shareable (so a stream is owner-only),
+and downloads carry no attribution file. `docs/ROADMAP.md` §4.4 tracks each.
 
 ## Local commands
 

@@ -39,6 +39,32 @@ export function createAuthenticationHook(
   };
 }
 
+/**
+ * The same verification, but a missing credential is allowed through (Requirement 12.6).
+ *
+ * The playback routes need this. Requirement 12.6 gates a *private* asset, so a public one is
+ * playable by someone who is not signed in — Requirement 14.3's public page has no account to
+ * offer — and a hook that demanded a token would make that page impossible to serve. The
+ * decision then belongs to `Playback_Service`, which admits the owner, admits anything publicly
+ * visible, and refuses the rest.
+ *
+ * A *bad* token is still rejected. Treating an expired token as anonymity would answer "this
+ * asset is private" to a signed-in owner whose token had just lapsed, which reads as a
+ * permissions bug rather than as the expiry it is.
+ */
+export function createOptionalAuthenticationHook(
+  accountService: Pick<AccountService, 'authenticateAccessToken'>,
+): preHandlerHookHandler {
+  return async function authenticateOptional(request): Promise<void> {
+    const token = readBearerToken(request);
+    if (token === null) {
+      request.authenticatedAccount = null;
+      return;
+    }
+    request.authenticatedAccount = await accountService.authenticateAccessToken(token);
+  };
+}
+
 /** Returns the authenticated account, or throws if the hook did not run. */
 export function requireAccount(request: FastifyRequest): AuthenticatedAccount {
   const account = request.authenticatedAccount;
@@ -46,6 +72,11 @@ export function requireAccount(request: FastifyRequest): AuthenticatedAccount {
     throw authorizationHeaderMissing();
   }
   return account;
+}
+
+/** The caller's identifier, or `null` on a route that admits anonymous requests. */
+export function optionalAccountId(request: FastifyRequest): string | null {
+  return request.authenticatedAccount?.accountId ?? null;
 }
 
 function readBearerToken(request: FastifyRequest): string | null {

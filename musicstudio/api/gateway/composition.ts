@@ -21,7 +21,13 @@ import { createRedisConnection } from '../../services/account/adapters/redis-cli
 import { createRedisLoginAttemptStore } from '../../services/account/adapters/redis-login-attempt-store';
 import { createRedisSessionStore } from '../../services/account/adapters/redis-session-store';
 import { systemClock, type Clock } from '../../services/clock';
-import { createDspHttpClient, type DspClient, type DspHttpClient } from '../../services/generation/adapters/dsp-http-client';
+import {
+  createDspHttpClient,
+  type DspClient,
+  type DspConversionClient,
+  type DspHttpClient,
+  type DspWaveformClient,
+} from '../../services/generation/adapters/dsp-http-client';
 import { createPgAssetPublication } from '../../services/generation/adapters/pg-asset-publication';
 import { createInMemoryJobEventBus } from '../../services/generation/job-events';
 import { createInMemoryJobQueue } from '../../services/generation/job-queue';
@@ -33,7 +39,18 @@ import {
   startTimeoutSweep,
 } from '../../services/generation/self-polling-orchestrator';
 import { SongGateway } from '../../services/generation/song-gateway';
+import { createConfiguredPlanPort } from '../../services/library/adapters/configured-plan';
+import { createDspDownloadConversion } from '../../services/library/adapters/dsp-download-conversion';
+import { createPgAssetStore } from '../../services/library/adapters/pg-asset-store';
+import { createPgPlaylistStore } from '../../services/library/adapters/pg-playlist-store';
+import { createZipStemArchive } from '../../services/library/adapters/zip-archive';
+import { createDownloadService } from '../../services/library/download-service';
+import { createLibraryService } from '../../services/library/library-service';
+import { createDspWaveformPort } from '../../services/playback/adapters/dsp-waveform';
 import { createFilesystemObjectStore } from '../../services/playback/adapters/filesystem-object-store';
+import { ownerOnlyVisibility } from '../../services/playback/adapters/owner-only-visibility';
+import { createPgPlaybackAssetStore } from '../../services/playback/adapters/pg-playback-asset-store';
+import { createPlaybackService } from '../../services/playback/playback-service';
 
 import { buildGatewayApp } from './app';
 import type { GatewayConfig } from './config';
@@ -73,8 +90,14 @@ import { buildSocialProviders } from './social-providers';
 export interface CompositionOverrides {
   /** Scripted engine in place of HTTP to `config.engine.baseUrl`. */
   readonly aceTransport?: AceTransport;
-  /** Scripted DSP in place of HTTP to `config.dspUrl`. Readiness then reports it as `skipped`. */
-  readonly dsp?: DspClient;
+  /**
+   * Scripted DSP in place of HTTP to `config.dspUrl`. Readiness then reports it as `skipped`.
+   *
+   * All three interfaces, because the composition uses all three — publication normalises,
+   * downloads convert, waveforms reduce. A double that satisfied only the first would compile
+   * and then fail at the first download, which is the kind of gap a seam exists to prevent.
+   */
+  readonly dsp?: ComposedDsp;
   /** A manual scheduler makes polls, sweeps and health probes run when the test says. */
   readonly scheduler?: Scheduler;
   readonly clock?: Clock;
@@ -83,6 +106,9 @@ export interface CompositionOverrides {
   /** Fastify's request logger; on in production, off under test. */
   readonly requestLogging?: boolean;
 }
+
+/** Everything this composition asks of the DSP; `DspHttpClient` satisfies it, plus `health`. */
+export type ComposedDsp = DspClient & DspConversionClient & DspWaveformClient;
 
 export type ReadinessProbe = 'ok' | 'error' | 'skipped';
 
@@ -175,8 +201,9 @@ export function composeGateway(config: GatewayConfig, overrides: CompositionOver
   const health = createHealthMonitor({ registry, clock, scheduler, timeoutRunner: realTimeoutRunner });
 
   // --- Generation (Requirements 3–6) over the S1–S3 seams.
-  const dspHttp = overrides.dsp === undefined ? createDspHttpClient({ baseUrl: config.dspUrl }) : null;
-  const dsp: DspClient = overrides.dsp ?? (dspHttp as DspHttpClient);
+  const dspHttp: DspHttpClient | null =
+    overrides.dsp === undefined ? createDspHttpClient({ baseUrl: config.dspUrl }) : null;
+  const dsp: ComposedDsp = overrides.dsp ?? (dspHttp as DspHttpClient);
   const store = createInMemoryJobStore();
   const events = createInMemoryJobEventBus();
   const runtime: JobRuntime = {
@@ -211,11 +238,49 @@ export function composeGateway(config: GatewayConfig, overrides: CompositionOver
   });
   const songGateway = new SongGateway({ orchestrator });
 
+  // --- The read paths (Requirements 11, 12, 13). Everything a stored asset is *for*: it is
+  // listed, it is played, it is downloaded. Until S6 the gateway mounted none of them, so a
+  // job could produce an asset that nothing could reach.
+  const library = createLibraryService({
+    assets: createPgAssetStore(pool),
+    playlists: createPgPlaylistStore(pool),
+    clock,
+    audit: {
+      record: async (event) =>
+        log({
+          event: 'library.asset',
+          event_type: event.eventType,
+          actor_id: event.actorId,
+          target_id: event.targetId,
+          at_ms: event.atMs,
+        }),
+    },
+  });
+  const playback = createPlaybackService({
+    assets: createPgPlaybackAssetStore(pool),
+    visibility: ownerOnlyVisibility,
+    objects,
+    waveforms: createDspWaveformPort({ objects, dsp }),
+  });
+  const downloads = createDownloadService({
+    assets: createPgAssetStore(pool),
+    conversion: createDspDownloadConversion({ objects, dsp }),
+    archive: createZipStemArchive({ objects }),
+    plans: createConfiguredPlanPort(config.defaultPlanId),
+    loadOwned: library.loadOwned,
+    // Requirements 33.9, 33.11, 33.19's licensing service is not composed: it needs an asset
+    // licensing store, a lineage reader and an engine catalogue, and only the third exists.
+    // Without it a download carries no attribution file and no commercial-use gate, and the
+    // service reports `non_commercial` for every download — which is the safe direction, and
+    // the one a deployment with no licensing answer should give.
+  });
+
   const app = buildGatewayApp({
     accountService,
     clock,
     engines: { registry, adapterFactory },
     generation: { orchestrator, events, runtime, songGateway },
+    library: { library, playback, downloads },
     fastifyOptions: { logger: overrides.requestLogging ?? true },
   });
 

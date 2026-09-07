@@ -1,0 +1,17 @@
+# The build copies what it needs explicitly; this is the belt to that pair of braces, and it
+# keeps a stray local `node_modules` or `data/` out of the build context.
+node_modules/
+web/node_modules/
+web/dist/
+dsp/.venv/
+dsp/**/__pycache__/
+dsp/.pytest_cache/
+dsp/.hypothesis/
+dsp/*.egg-info/
+dsp/src/*.egg-info/
+data/
+coverage/
+build/
+*.tsbuildinfo
+test/
+docs/

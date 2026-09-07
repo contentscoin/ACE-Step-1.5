@@ -45,7 +45,7 @@ from typing import Any, Final
 from celery import Celery
 
 from .effects import apply_chain, parse_chain
-from .formats import AudioFormat, decode, encode
+from .formats import AudioFormat, decode, encode, read_tags
 from .loudness import measure
 from .mastering import clean_dialogue, duck, normalise_loudness
 from .mfcc import CUE_PAIR_SIMILARITY_CEILING, mfcc_vector, similarity_report
@@ -135,7 +135,15 @@ def convert_for_download_task(
     audio_format: AudioFormat,
     tags: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Requirements 13.3, 13.7, 13.9, 13.10. Shell over :func:`pipeline.convert_for_download`."""
+    """Requirements 13.3, 13.7, 13.9, 13.10. Shell over :func:`pipeline.convert_for_download`.
+
+    ``tags`` is reported by reading the *encoded bytes back*, not by echoing the argument.
+    Requirement 13.7's failure mode is silent — a download with no marker is still a working
+    download — so ``DownloadConversionPort`` in the product layer makes the written tags a
+    required field and compares them with what it asked for. Echoing the request would make
+    that comparison compare a value with itself; a container that cannot carry a field (or an
+    encoder that dropped it) has to be visible here, where the download can still be refused.
+    """
     result = convert_for_download(base64.b64decode(audio_base64), audio_format, tags)
     return {
         "audio_base64": base64.b64encode(result.data).decode("ascii"),
@@ -145,6 +153,7 @@ def convert_for_download_task(
         "duration_ms": result.audio.duration_ms,
         "lossless": result.lossless,
         "length_error_ms": result.resample.length_error_ms,
+        "tags": read_tags(result.data),
     }
 
 

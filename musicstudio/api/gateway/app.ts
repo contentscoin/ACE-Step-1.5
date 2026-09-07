@@ -11,6 +11,9 @@ import type { JobEventBusPort } from '../../services/generation/job-events';
 import type { JobOrchestrator } from '../../services/generation/job-orchestrator';
 import type { JobRuntime } from '../../services/generation/runtime';
 import type { SongGateway } from '../../services/generation/song-gateway';
+import type { createDownloadService } from '../../services/library/download-service';
+import type { createLibraryService } from '../../services/library/library-service';
+import type { createPlaybackService } from '../../services/playback/playback-service';
 import type { LyricsAssistant } from '../../services/lyrics/lyrics-assistant';
 import type { TimedLyricsService } from '../../services/lyrics/timed-lyrics-service';
 import type { ReportService } from '../../services/moderation/report-service';
@@ -20,7 +23,11 @@ import type { ConsentService } from '../../services/voice/consent-service';
 import type { ProfileAccessService } from '../../services/voice/profile-access-service';
 import type { WithdrawalService } from '../../services/voice/withdrawal-service';
 
-import { createAuthenticationHook, registerAuthenticationDecorator } from './authentication';
+import {
+  createAuthenticationHook,
+  createOptionalAuthenticationHook,
+  registerAuthenticationDecorator,
+} from './authentication';
 import { registerErrorHandler } from './error-handler';
 import {
   createApiKeyAuthenticationHook,
@@ -31,9 +38,12 @@ import { registerAccountRoutes } from './routes/account-routes';
 import { registerApiKeyRoutes } from './routes/api-key-routes';
 import { registerAuthRoutes } from './routes/auth-routes';
 import { registerCreditRoutes } from './routes/credit-routes';
+import { registerDownloadRoutes } from './routes/download-routes';
 import { registerEditRoutes } from './routes/edit-routes';
 import { registerEngineRoutes } from './routes/engine-routes';
 import { registerGenerationRoutes } from './routes/generation-routes';
+import { registerLibraryRoutes } from './routes/library-routes';
+import { registerPlaybackRoutes } from './routes/playback-routes';
 import { registerLyricsRoutes } from './routes/lyrics-routes';
 import { registerModerationRoutes } from './routes/moderation-routes';
 import { registerPublicApiRoutes } from './routes/public-api-routes';
@@ -149,10 +159,29 @@ export interface GatewayPublicApiDependencies {
   readonly gateways?: Partial<Record<AssetKind, SongGateway>>;
 }
 
+/**
+ * Library, playback and download wiring (Requirements 11, 12, 13), optional like the rest.
+ *
+ * The three travel together because they are the one journey a stored asset has — it is
+ * listed, it is played, it is downloaded — and because all three read the same assets. They
+ * are still three services with three sets of ports; what this block asserts is only that a
+ * composition offering one of them has no reason to withhold the others.
+ *
+ * `playback` is what makes the routes below open to an anonymous caller (Requirement 12.6);
+ * see `createOptionalAuthenticationHook`.
+ */
+export interface GatewayLibraryDependencies {
+  readonly library: ReturnType<typeof createLibraryService>;
+  readonly playback: ReturnType<typeof createPlaybackService>;
+  readonly downloads: ReturnType<typeof createDownloadService>;
+}
+
 export interface GatewayDependencies {
   readonly accountService: AccountService;
   readonly clock?: Clock;
   readonly engines?: GatewayEngineDependencies;
+  /** Mounts the Requirement 11 / 12 / 13 routes when supplied. */
+  readonly library?: GatewayLibraryDependencies;
   readonly moderation?: GatewayModerationDependencies;
   /** Mounts the Requirement 26 consent, withdrawal and sharing routes when supplied. */
   readonly voiceConsent?: GatewayVoiceConsentDependencies;
@@ -216,6 +245,16 @@ export function buildGatewayApp(deps: GatewayDependencies): FastifyInstance {
       }
       if (deps.creditService !== undefined) {
         registerCreditRoutes(scope, { creditService: deps.creditService, authenticate });
+      }
+      if (deps.library !== undefined) {
+        registerLibraryRoutes(scope, { library: deps.library.library, authenticate });
+        registerDownloadRoutes(scope, { downloads: deps.library.downloads, authenticate });
+        // Requirement 12.6: a public asset is playable without an account, so these routes
+        // verify a token when one is offered and admit the request when none is.
+        registerPlaybackRoutes(scope, {
+          playback: deps.library.playback,
+          authenticateOptional: createOptionalAuthenticationHook(deps.accountService),
+        });
       }
       if (deps.publicApi !== undefined) {
         // Issuing a key is a signed-in action, not an API-key one: minting a credential with a
