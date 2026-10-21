@@ -231,6 +231,7 @@ describe('Requirement 4 — Custom_Mode end to end', () => {
       time_signature: '4',
       audio_duration: 180,
       batch_size: 4,
+      audio_format: 'flac',
       use_random_seed: false,
       seed: 20_250_501,
     });

@@ -57,6 +57,7 @@ describe('Requirement 7.1 — a cover sends task_type=cover with the source audi
       thinking: true,
       prompt: 'acoustic reharmonisation, brushed drums',
       batch_size: 1,
+      audio_format: 'flac',
       use_random_seed: true,
       seed: ACE_RANDOM_SEED_SENTINEL,
       src_audio_path: SOURCE.enginePath,

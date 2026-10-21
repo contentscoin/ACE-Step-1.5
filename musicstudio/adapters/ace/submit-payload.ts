@@ -13,8 +13,13 @@
  *   in `acestep/inference.py`, which only forwards non-empty values to the LM. A
  *   default written here would silently overrule the user's choice not to choose.
  * - Nothing that the requirements do not mention is sent at all. Sampler settings,
- *   model selection, LM decoding parameters and output format all have engine-side
- *   defaults; restating them here would fork them.
+ *   model selection and LM decoding parameters all have engine-side defaults;
+ *   restating them here would fork them.
+ * - The one exception is `audio_format`. The engine's default is `"mp3"`
+ *   (`release_task_models.py`), and accepting it would make every stored master a
+ *   transcode of a lossy file — the FLAC the DSP worker stores and the lossless
+ *   download Requirement 13 sells would only be lossless in name. It is a statement
+ *   about this product's storage, not an engine tuning knob, so it is pinned here.
  *
  * The payload is a plain record rather than a class so a test can compare it whole
  * against the expected wire form.
@@ -27,6 +32,9 @@ import { ACE_DEFAULT_TASK_TYPE, aceTaskTypeForEditKind, type AceTaskType } from 
 
 /** Engine sentinel for "no explicit seed": `seed: Union[int, str] = -1`. */
 export const ACE_RANDOM_SEED_SENTINEL = -1;
+
+/** Lossless engine output, so storage never starts from a lossy file. */
+export const ACE_OUTPUT_AUDIO_FORMAT = 'flac';
 
 export interface AceSubmitPayloadInput {
   readonly song: SongParameters;
@@ -81,6 +89,9 @@ export function buildAceSubmitPayload(input: AceSubmitPayloadInput): AceSubmitPa
 
     // Requirement 4.8.
     batch_size: song.batchSize,
+
+    // Lossless output; see the module comment for why this one default is restated.
+    audio_format: ACE_OUTPUT_AUDIO_FORMAT,
 
     // Requirement 4.10: an explicit seed turns off random seeding, so the same
     // input reproduces the same audio. With no seed the engine keeps its own
