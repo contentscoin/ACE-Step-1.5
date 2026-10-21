@@ -233,7 +233,7 @@ describeComposed('the composition root against PostgreSQL, Redis and a scripted 
     expect(ace?.engineId).toBe(ACE_STEP_ENGINE_ID);
     expect(ace?.availableNow).toBe(true);
     // Requirement 20.8's threshold, probed at boot — see `ComposedGateway.start`.
-    expect(transport.jsonRequests.filter((request) => request.path === '/health')).toHaveLength(3);
+    expect(transport.queryRequests.filter((request) => request.path === '/health')).toHaveLength(3);
   });
 
   it('carries a song from registration to a stored, watermarked asset', async () => {

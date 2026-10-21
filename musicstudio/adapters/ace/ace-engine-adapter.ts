@@ -158,11 +158,14 @@ export class AceEngineAdapter implements EngineAdapter {
    * here; a probe either answers or is cut off by the caller. An unreachable engine
    * is an unhealthy engine rather than a thrown error, because the monitor's job is
    * to record an outcome for every probe.
+   *
+   * `GET`, because that is how `model_service_routes.py` registers `/health`; a `POST`
+   * is a 405 that would keep a running engine `unavailable` from the first boot probe on.
    */
   async healthCheck(): Promise<HealthCheckResult> {
     const startedAtMs = this.clock.now().getTime();
     try {
-      const response = await this.transport.postJson({ path: ACE_PATHS.health, body: {} });
+      const response = await this.transport.getJson({ path: ACE_PATHS.health, query: {} });
       const data = asRecord(unwrapEnvelope(ACE_PATHS.health, response));
       const status = data?.status;
       return {

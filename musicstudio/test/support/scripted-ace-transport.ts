@@ -4,6 +4,7 @@ import type {
   AceEnvelope,
   AceJsonRequest,
   AceJsonResponse,
+  AceQueryRequest,
   AceTransport,
 } from '../../adapters/ace/transport';
 import { ACE_PATHS } from '../../adapters/ace/ace-engine-adapter';
@@ -22,6 +23,11 @@ import type { SongTrackMetadata } from '../../domain/song/track-metadata';
  * The envelope shape, the JSON-string `result` field and the nested per-audio item
  * shape all reproduce `acestep/api/http/query_result_service.py` faithfully, so a
  * decoding bug in the adapter shows up here rather than in production.
+ *
+ * Two details are reproduced *because* an earlier version of this double got them wrong
+ * and so hid the adapter getting them wrong too: `/health` answers only `GET` (a `POST`
+ * is FastAPI's 405), and an item's `file` is the download URL `_path_to_audio_url`
+ * builds, `/v1/audio?path=<encoded>`, not the bare path `setAudio` is keyed by.
  */
 export interface ScriptedAceTransport extends AceTransport {
   /** Reply to the next `/release_task` with this task id. */
@@ -38,6 +44,8 @@ export interface ScriptedAceTransport extends AceTransport {
   setFormattedSample(sample: AceScriptedFormattedSample): void;
   setHealthy(healthy: boolean): void;
   readonly jsonRequests: readonly AceJsonRequest[];
+  /** Every `GET` that expects an envelope — in practice, health probes. */
+  readonly queryRequests: readonly AceQueryRequest[];
   readonly binaryRequests: readonly AceBinaryRequest[];
   /** The single request posted to `path`; throws when there is not exactly one. */
   onlyRequestTo(path: string): AceJsonRequest;
@@ -84,6 +92,7 @@ const RUNNING: AceScriptedResult = { statusCode: 0, progress: 0.25 };
 
 export function createScriptedAceTransport(): ScriptedAceTransport {
   const jsonRequests: AceJsonRequest[] = [];
+  const queryRequests: AceQueryRequest[] = [];
   const binaryRequests: AceBinaryRequest[] = [];
   const results: AceScriptedResult[] = [];
   const audio = new Map<string, Buffer>();
@@ -114,6 +123,7 @@ export function createScriptedAceTransport(): ScriptedAceTransport {
 
   return {
     jsonRequests,
+    queryRequests,
     binaryRequests,
 
     setTaskId(next, position = 1) {
@@ -189,12 +199,26 @@ export function createScriptedAceTransport(): ScriptedAceTransport {
       }
 
       if (request.path === ACE_PATHS.health) {
+        // FastAPI's answer to a verb the route was not registered with; not an envelope.
+        return { httpStatus: 405, envelope: { detail: 'Method Not Allowed' } as unknown as AceEnvelope };
+      }
+
+      return { httpStatus: 404, envelope: { data: null, code: 404, error: 'no such route' } };
+    },
+
+    async getJson(request): Promise<AceJsonResponse> {
+      queryRequests.push(request);
+      const failure = failures.get(request.path);
+      if (failure !== undefined) {
+        failures.delete(request.path);
+        return { httpStatus: failure.httpStatus, envelope: { data: null, code: failure.httpStatus } };
+      }
+      if (request.path === ACE_PATHS.health) {
         return {
           httpStatus: 200,
           envelope: envelope({ status: healthy ? 'ok' : 'degraded', service: 'ACE-Step API' }),
         };
       }
-
       return { httpStatus: 404, envelope: { data: null, code: 404, error: 'no such route' } };
     },
 
@@ -248,7 +272,7 @@ function resultPayload(answer: AceScriptedResult): readonly Record<string, unkno
   return audios.map((entry) => {
     const meta = entry.metadata ?? {};
     return {
-      file: entry.file,
+      file: downloadUrlFor(entry.file),
       wave: '',
       status: answer.statusCode,
       create_time: 1_700_000_000,
@@ -264,4 +288,10 @@ function resultPayload(answer: AceScriptedResult): readonly Record<string, unkno
       },
     };
   });
+}
+
+/** `_path_to_audio_url` in `acestep/api_server.py`: `quote(path, safe="")` behind the route. */
+function downloadUrlFor(path: string): string {
+  if (path === '' || /^https?:\/\//.test(path)) return path;
+  return `${ACE_PATHS.audio}?path=${encodeURIComponent(path)}`;
 }
