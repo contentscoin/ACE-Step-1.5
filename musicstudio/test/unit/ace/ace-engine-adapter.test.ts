@@ -249,6 +249,54 @@ describe('Requirement 3.4 — fetchResult carries the metadata the engine finall
     expect(normalized.originalSampleRate).toBe(ACE_ENGINE_SAMPLE_RATE);
   });
 
+  it('requests the path inside the download URL the engine reports, not the URL itself', async () => {
+    const transport = createScriptedAceTransport();
+    const enginePath = '/tmp/api_audio/뮤직 스튜디오 #1.flac';
+    transport.setAudio(enginePath, Buffer.from('audio'));
+    // What `query_result_service.py` puts in `file`: `_path_to_audio_url(path)`.
+    transport.enqueueResult({
+      statusCode: 1,
+      rawResult: JSON.stringify([
+        { file: `/v1/audio?path=${encodeURIComponent(enginePath)}`, status: 1, metas: {} },
+      ]),
+    });
+
+    const [result] = await createAdapter(transport).fetchResult(handleFor('task-abc'));
+
+    expect(result?.audioBuffer.toString()).toBe('audio');
+    expect(transport.binaryRequests).toEqual([
+      { path: ACE_PATHS.audio, query: { path: enginePath } },
+    ]);
+  });
+
+  it('still accepts a bare path, which the engine local-cache branch can report', async () => {
+    const transport = createScriptedAceTransport();
+    transport.setAudio('/tmp/cached.flac', Buffer.from('cached'));
+    transport.enqueueResult({
+      statusCode: 1,
+      rawResult: JSON.stringify([{ file: '/tmp/cached.flac', status: 1, metas: {} }]),
+    });
+
+    const [result] = await createAdapter(transport).fetchResult(handleFor('task-abc'));
+
+    expect(result?.audioBuffer.toString()).toBe('cached');
+  });
+
+  it('refuses an audio hosted elsewhere rather than dropping it from the result', async () => {
+    const transport = createScriptedAceTransport();
+    transport.enqueueResult({
+      statusCode: 1,
+      rawResult: JSON.stringify([{ file: 'https://cdn.example/out.flac', status: 1, metas: {} }]),
+    });
+
+    const error: unknown = await createAdapter(transport)
+      .fetchResult(handleFor('task-abc'))
+      .catch((thrown: unknown) => thrown);
+
+    expect(isAceEngineError(error) ? error.code : null).toBe('ace_engine_malformed_response');
+    expect(transport.binaryRequests).toEqual([]);
+  });
+
   it('returns nothing while the engine has produced no file yet', async () => {
     const transport = createScriptedAceTransport();
     transport.enqueueResult({ statusCode: 0, progress: 0.1 });
@@ -285,7 +333,9 @@ describe('healthCheck', () => {
     const result = await createAdapter(transport).healthCheck();
 
     expect(result.healthy).toBe(true);
-    expect(transport.onlyRequestTo(ACE_PATHS.health)).toBeDefined();
+    // A GET, as the engine registers it: the double answers a POST with FastAPI's 405.
+    expect(transport.queryRequests).toEqual([{ path: ACE_PATHS.health, query: {} }]);
+    expect(transport.lastRequestTo(ACE_PATHS.health)).toBeUndefined();
   });
 
   it('is unhealthy, rather than throwing, when the engine reports anything else', async () => {
@@ -302,7 +352,7 @@ describe('healthCheck', () => {
     const transport: ScriptedAceTransport = createScriptedAceTransport();
     const unreachable: ScriptedAceTransport = {
       ...transport,
-      postJson: () => Promise.reject(new Error('ECONNREFUSED')),
+      getJson: () => Promise.reject(new Error('ECONNREFUSED')),
     };
 
     const result = await createAdapter(unreachable).healthCheck();

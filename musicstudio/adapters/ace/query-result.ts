@@ -26,12 +26,16 @@
 import type { SongTrackMetadata } from '../../domain/song/track-metadata';
 import { EMPTY_SONG_TRACK_METADATA } from '../../domain/song/track-metadata';
 
+import { engineAudioPathOf } from './audio-location';
 import { asFiniteNumber, asRecord, asReportedText } from './envelope';
 import { aceMalformedResponse } from './errors';
 
 /** One produced audio, with the metadata the engine settled on. */
 export interface AceResultEntry {
-  /** Engine-side path, passed to `GET /v1/audio?path=…`. */
+  /**
+   * Engine-side path, passed to `GET /v1/audio?path=…` — already unwrapped from the download
+   * URL the engine reports (`audio-location.ts`).
+   */
   readonly filePath: string | null;
   readonly metadata: SongTrackMetadata;
 }
@@ -86,7 +90,7 @@ function decodeOne(
     failureReason: asReportedText(first?.error),
     // A task that has not finished reports one placeholder item with no file, so
     // only entries that actually name a file become results.
-    entries: items.filter((item) => item.file !== null).map(toEntry),
+    entries: items.filter((item) => item.file !== null).map((item) => toEntry(path, item)),
   };
 }
 
@@ -131,10 +135,15 @@ function parseJsonText(raw: unknown): unknown {
 }
 
 /** Requirement 3.4: the six values the engine finally used, plus its genre list. */
-function toEntry(item: AceResultItem): AceResultEntry {
+function toEntry(path: string, item: AceResultItem): AceResultEntry {
   const { metas } = item;
+  const filePath = item.file === null ? null : engineAudioPathOf(item.file);
+  if (item.file !== null && filePath === null) {
+    // Refused rather than dropped: a vanished output would read as a song with fewer takes.
+    throw aceMalformedResponse(path, 'ACE-Step reported an audio this adapter cannot fetch.');
+  }
   return {
-    filePath: item.file,
+    filePath,
     metadata: {
       ...EMPTY_SONG_TRACK_METADATA,
       caption: asReportedText(item.prompt),

@@ -51,8 +51,22 @@ export interface AceBinaryResponse {
   readonly body: Buffer;
 }
 
+/** A `GET` that answers with an envelope — `/health` is the one such route the adapter uses. */
+export interface AceQueryRequest {
+  readonly path: string;
+  readonly query: Readonly<Record<string, string>>;
+}
+
 export interface AceTransport {
   postJson(request: AceJsonRequest): Promise<AceJsonResponse>;
+  /**
+   * `GET` for the JSON routes the engine registers that way.
+   *
+   * A separate method rather than a verb on `postJson`, because the verb is part of the route:
+   * `model_service_routes.py` registers `@app.get("/health")`, so a `POST` is a 405 that reads
+   * as an unhealthy engine forever.
+   */
+  getJson(request: AceQueryRequest): Promise<AceJsonResponse>;
   getBinary(request: AceBinaryRequest): Promise<AceBinaryResponse>;
 }
 
@@ -83,6 +97,12 @@ export function createAceHttpTransport(config: AceHttpTransportConfig): AceTrans
   const origin = config.baseUrl.replace(/\/+$/, '');
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (config.apiToken !== undefined) headers.authorization = `Bearer ${config.apiToken}`;
+  const authorization: Record<string, string> =
+    config.apiToken === undefined ? {} : { authorization: `Bearer ${config.apiToken}` };
+  const urlFor = (path: string, query: Readonly<Record<string, string>>): string => {
+    const search = new URLSearchParams(query).toString();
+    return `${origin}${path}${search === '' ? '' : `?${search}`}`;
+  };
 
   return {
     async postJson(request) {
@@ -97,14 +117,21 @@ export function createAceHttpTransport(config: AceHttpTransportConfig): AceTrans
       };
     },
 
-    async getBinary(request) {
-      const query = new URLSearchParams(request.query).toString();
-      const suffix = query === '' ? '' : `?${query}`;
-      const response = await fetchImpl(`${origin}${request.path}${suffix}`, {
+    async getJson(request) {
+      const response = await fetchImpl(urlFor(request.path, request.query), {
         method: 'GET',
-        ...(config.apiToken === undefined
-          ? {}
-          : { headers: { authorization: `Bearer ${config.apiToken}` } }),
+        headers: authorization,
+      });
+      return {
+        httpStatus: response.status,
+        envelope: (await response.json()) as AceEnvelope,
+      };
+    },
+
+    async getBinary(request) {
+      const response = await fetchImpl(urlFor(request.path, request.query), {
+        method: 'GET',
+        headers: authorization,
       });
       return {
         httpStatus: response.status,
