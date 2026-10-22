@@ -157,8 +157,9 @@ npm run engine:smoke -- --duration 30 --thinking --caption "warm lo-fi piano, vi
 ## 4. 다음 단계
 
 엔진에서 소리가 나오면 MusicStudio의 나머지(게이트웨이, PostgreSQL, Redis, DSP)를 Docker
-Desktop으로 띄우고 이 엔진에 연결합니다. 그 절차는 다음 문서에서 다룹니다. 그때까지 엔진
-실행 설정은 기본값 그대로 두면 됩니다.
+Desktop으로 띄우고 이 엔진에 연결합니다:
+[LOCAL_STACK_WINDOWS.md](LOCAL_STACK_WINDOWS.md). 엔진 실행 설정은 그 문서가 바꾸라고 할
+때까지 기본값 그대로 두면 됩니다.
 
 ## 참고
 
