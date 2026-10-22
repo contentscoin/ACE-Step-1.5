@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { ACE_PATHS, AceEngineAdapter } from '../../../adapters/ace/ace-engine-adapter';
+import {
+  ACE_PATHS,
+  ACE_TASK_FORGOTTEN_REASON,
+  AceEngineAdapter,
+} from '../../../adapters/ace/ace-engine-adapter';
 import type { EngineAdapter } from '../../../adapters/engine-adapter';
 import { isAceEngineError } from '../../../adapters/ace/errors';
 import { hasTrackMetadata } from '../../../adapters/ace/raw-result';
@@ -167,15 +171,48 @@ describe('Requirement 5.3 — poll reports the engine status untranslated', () =
     });
   });
 
-  it('fails when the engine does not know the task', async () => {
+  it('reports a task missing from the answer as failed, rather than throwing', async () => {
     const transport: ScriptedAceTransport = createScriptedAceTransport();
     const empty: ScriptedAceTransport = {
       ...transport,
       postJson: async () => ({ httpStatus: 200, envelope: { data: [], code: 200, error: null } }),
     };
 
-    const error: unknown = await createAdapter(empty)
-      .poll(handleFor('task-gone'))
+    const status = await createAdapter(empty).poll(handleFor('task-gone'));
+
+    // A throw would be read upstream as "unreachable" and retried until the job budget ran out.
+    expect(status.state).toBe(ENGINE_JOB_STATE.failed);
+    expect(status.failureReason).toBe(ACE_TASK_FORGOTTEN_REASON);
+  });
+
+  it('reads the engine "not found" answer as a forgotten task, not a running one', async () => {
+    const transport = createScriptedAceTransport();
+    // What `collect_query_results` answers for an id its store does not hold — e.g. after
+    // the engine restarted: status 0 ("running") with an empty result list.
+    transport.enqueueResult({ statusCode: 0, rawResult: '[]' });
+
+    const status = await createAdapter(transport).poll(handleFor('task-lost'));
+
+    expect(status.state).toBe(ENGINE_JOB_STATE.failed);
+    expect(status.failureReason).toBe(ACE_TASK_FORGOTTEN_REASON);
+  });
+
+  it('still treats a queued task, which reports a placeholder item, as running', async () => {
+    const transport = createScriptedAceTransport();
+    // The engine's answer for a task it holds but has not started: one item, no file.
+    transport.enqueueResult({ statusCode: 0, progress: 0 });
+
+    const status = await createAdapter(transport).poll(handleFor('task-queued'));
+
+    expect(status.state).toBe(ENGINE_JOB_STATE.running);
+  });
+
+  it('refuses to fetch results for a forgotten task', async () => {
+    const transport = createScriptedAceTransport();
+    transport.enqueueResult({ statusCode: 0, rawResult: '[]' });
+
+    const error: unknown = await createAdapter(transport)
+      .fetchResult(handleFor('task-lost'))
       .catch((thrown: unknown) => thrown);
 
     expect(isAceEngineError(error) ? error.code : null).toBe('ace_engine_task_unknown');
