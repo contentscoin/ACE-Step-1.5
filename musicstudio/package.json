@@ -10,6 +10,7 @@
   "scripts": {
     "start": "tsx api/gateway/main.ts",
     "db:migrate": "tsx scripts/migrate.ts",
+    "engine:smoke": "tsx scripts/engine-smoke.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
