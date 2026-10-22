@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ACE_OUTPUT_AUDIO_FORMAT,
   ACE_RANDOM_SEED_SENTINEL,
   buildAceSubmitPayload,
 } from '../../../adapters/ace/submit-payload';
@@ -206,9 +207,16 @@ describe('the payload carries nothing the requirements did not ask for', () => {
   it('sends exactly the fields Simple_Mode needs', () => {
     const payload = payloadFor({ mode: 'simple', description: 'a waltz' });
 
-    expect(Object.keys(payload).sort()).toEqual(
-      ['batch_size', 'sample_mode', 'sample_query', 'seed', 'task_type', 'thinking', 'use_random_seed'],
-    );
+    expect(Object.keys(payload).sort()).toEqual([
+      'audio_format',
+      'batch_size',
+      'sample_mode',
+      'sample_query',
+      'seed',
+      'task_type',
+      'thinking',
+      'use_random_seed',
+    ]);
   });
 
   it('leaves the task type open for the edit tasks without inventing their parameters', () => {
@@ -222,5 +230,27 @@ describe('the payload carries nothing the requirements did not ask for', () => {
     };
 
     expect(buildAceSubmitPayload({ song, taskType: 'cover' }).task_type).toBe('cover');
+  });
+});
+
+describe('the engine is asked for lossless output', () => {
+  it('requests FLAC instead of accepting the engine mp3 default', () => {
+    // `release_task_models.py` defaults `audio_format` to "mp3"; storing a transcode of
+    // that would make the FLAC master and the lossless download lossy in fact.
+    expect(ACE_OUTPUT_AUDIO_FORMAT).toBe('flac');
+    expect(payloadFor({ mode: 'simple', description: 'a waltz' }).audio_format).toBe('flac');
+  });
+
+  it('requests it for edit tasks too, whatever the task type', () => {
+    const song: SongParameters = {
+      mode: 'custom',
+      sampleMode: false,
+      thinking: true,
+      instrumental: false,
+      batchSize: 1,
+      caption: 'a cover',
+    };
+
+    expect(buildAceSubmitPayload({ song, taskType: 'cover' }).audio_format).toBe('flac');
   });
 });

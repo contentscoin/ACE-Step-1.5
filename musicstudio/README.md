@@ -156,6 +156,18 @@ comma-separated allowlist, e.g. `https://studio.example.com,http://localhost:517
 by default, which permits no cross-origin browser call at all, and `*` is refused at boot: it
 would make every authenticated route readable by any page the user has open.
 
+### Checking the engine alone
+
+Before bringing the stores up, `npm run engine:smoke` makes one real song through the ACE-Step
+adapter and nothing else — health, submit, poll, fetch — and writes it under `data/smoke/`. It
+reads `MUSICSTUDIO_ENGINE_URL` / `MUSICSTUDIO_ENGINE_API_TOKEN` like the gateway does, and on
+failure names the stage (`health`, `submit`, `poll`, `fetch`, `timeout`) and exits 1.
+
+```bash
+npm run engine:smoke                                   # 10 s instrumental, LM thinking off
+npm run engine:smoke -- --duration 30 --thinking --caption "warm lo-fi piano"
+```
+
 What is still v0 in this composition is named in `api/gateway/composition.ts`: the job store,
 queue and event bus are in-memory (a restart forgets in-flight jobs), no credits are charged,
 no moderation service is composed, nothing is publicly shareable (so a stream is owner-only),
