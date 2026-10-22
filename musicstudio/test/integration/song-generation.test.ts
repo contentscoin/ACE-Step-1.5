@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ACE_PATHS, AceEngineAdapter } from '../../adapters/ace/ace-engine-adapter';
+import {
+  ACE_PATHS,
+  ACE_TASK_FORGOTTEN_REASON,
+  AceEngineAdapter,
+} from '../../adapters/ace/ace-engine-adapter';
 import { hasTrackMetadata } from '../../adapters/ace/raw-result';
 import { ENGINE_JOB_STATE } from '../../adapters/engine-job';
 import { INSTRUMENTAL_LYRICS } from '../../domain/song/request';
@@ -374,6 +378,22 @@ describe('the engine status codes reach the user through the existing mapping', 
     const record = await generation.store.find(jobId);
     expect(record?.lifecycle.state).toBe('failed');
     expect(record?.lifecycle.failure?.detail).toContain('CUDA out of memory');
+  });
+
+  it('fails a job at once when a restarted engine no longer holds its task', async () => {
+    const generation = requireGeneration(harness);
+    const accepted = await harness.app.inject(authorised({ description: 'a lost song' }, '/songs/simple'));
+    const { jobId } = accepted.json<{ jobId: string }>();
+
+    // `collect_query_results` for an id its store does not hold: "running", with no items.
+    transport.setDefaultResult({ statusCode: ENGINE_JOB_STATE.running, rawResult: '[]' });
+    await generation.orchestrator.pollOnce(jobId);
+
+    // Not left running until the 900 s budget ends it.
+    const record = await generation.store.find(jobId);
+    expect(record?.lifecycle.state).toBe('failed');
+    expect(record?.lifecycle.failure?.classification).toBe('engine_error');
+    expect(record?.lifecycle.failure?.detail).toBe(ACE_TASK_FORGOTTEN_REASON);
   });
 
   it('keeps a running engine status running, with its progress', async () => {

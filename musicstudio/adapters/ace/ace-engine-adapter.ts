@@ -34,6 +34,10 @@ import { toRawAudioResults } from './raw-result';
 import { type AceTaskType } from './task-type';
 import type { AceTransport } from './transport';
 
+/** Why a polled task failed when the engine no longer holds it (it restarted). */
+export const ACE_TASK_FORGOTTEN_REASON =
+  'ACE-Step has no record of this task; the engine was restarted while it was queued or running.';
+
 export const ACE_PATHS = {
   releaseTask: '/release_task',
   queryResult: '/query_result',
@@ -107,7 +111,10 @@ export class AceEngineAdapter implements EngineAdapter {
    * lifecycle state stays in `services/generation/engine-status.ts`.
    */
   async poll(handle: EngineJobHandle): Promise<EngineJobStatus> {
-    const result = await this.queryResult(handle);
+    const result = await this.findTaskResult(handle);
+    // A status, not a throw: a thrown poll is read as "unreachable" and retried until the
+    // 900 s budget runs out, which is 15 minutes of a dead job shown as running.
+    if (result === null) return { state: 2, failureReason: ACE_TASK_FORGOTTEN_REASON };
     const state = engineStateOf(result.statusCode);
     const failureReason = result.failureReason ?? result.progressText;
 
@@ -196,19 +203,23 @@ export class AceEngineAdapter implements EngineAdapter {
   }
 
   private async queryResult(handle: EngineJobHandle): Promise<AceTaskResult> {
+    const result = await this.findTaskResult(handle);
+    if (result === null) throw aceTaskUnknown(handle.engineJobId);
+    return result;
+  }
+
+  private async findTaskResult(handle: EngineJobHandle): Promise<AceTaskResult | null> {
     const response = await this.transport.postJson({
       path: ACE_PATHS.queryResult,
       // The engine accepts `task_id_list` as a list or as JSON text
       // (`parse_task_id_list`); the list form is used, being the typed one.
       body: { task_id_list: [handle.engineJobId] },
     });
-    const result = decodeTaskResult(
+    return decodeTaskResult(
       ACE_PATHS.queryResult,
       unwrapEnvelope(ACE_PATHS.queryResult, response),
       handle.engineJobId,
     );
-    if (result === null) throw aceTaskUnknown(handle.engineJobId);
-    return result;
   }
 
   private elapsedSince(startedAtMs: number): number {

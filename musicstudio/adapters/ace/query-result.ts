@@ -51,7 +51,12 @@ export interface AceTaskResult {
   readonly entries: readonly AceResultEntry[];
 }
 
-/** Finds the entry for one task in a `/query_result` batch answer. */
+/**
+ * Finds the entry for one task in a `/query_result` batch answer.
+ *
+ * `null` when the engine does not hold the task — either no entry names it, or the entry is
+ * the engine's own "not found" answer (`isForgottenTask`).
+ */
 export function decodeTaskResult(
   path: string,
   data: unknown,
@@ -64,9 +69,22 @@ export function decodeTaskResult(
   for (const element of data) {
     const record = asRecord(element);
     if (record === null || record.task_id !== taskId) continue;
-    return decodeOne(path, record, taskId);
+    return isForgottenTask(record) ? null : decodeOne(path, record, taskId);
   }
   return null;
+}
+
+/**
+ * The engine's answer for an id it does not hold: `{ task_id, result: "[]", status: 0 }`, the
+ * last branch of `collect_query_results`. It reads as "running" and would read that way for
+ * ever. A task the engine does hold always reports at least one item, its record exists before
+ * `/release_task` returns, and finished records are kept for 24 hours — so an empty list is an
+ * engine that restarted and lost the task, not one still working on it.
+ */
+function isForgottenTask(record: Readonly<Record<string, unknown>>): boolean {
+  if (asFiniteNumber(record.status) !== 0) return false;
+  const items = parseJsonText(record.result);
+  return Array.isArray(items) && items.length === 0;
 }
 
 function decodeOne(
