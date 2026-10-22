@@ -169,7 +169,9 @@ npm run engine:smoke -- --duration 30 --thinking --caption "warm lo-fi piano"
 ```
 
 Installing the engine on a Windows PC (written for a GTX 1070, 8 GB): see
-[`docs/LOCAL_ENGINE_WINDOWS.md`](docs/LOCAL_ENGINE_WINDOWS.md).
+[`docs/LOCAL_ENGINE_WINDOWS.md`](docs/LOCAL_ENGINE_WINDOWS.md). Then, to run the rest of the
+stack in Docker Desktop on the same PC and generate from the web UI:
+[`docs/LOCAL_STACK_WINDOWS.md`](docs/LOCAL_STACK_WINDOWS.md).
 
 What is still v0 in this composition is named in `api/gateway/composition.ts`: the job store,
 queue and event bus are in-memory (a restart forgets in-flight jobs), no credits are charged,
